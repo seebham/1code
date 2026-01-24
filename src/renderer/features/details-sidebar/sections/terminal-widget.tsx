@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAtom, useAtomValue } from "jotai"
 import { useTheme } from "next-themes"
 import { fullThemeDataAtom } from "@/lib/atoms"
@@ -57,8 +57,9 @@ function getNextTerminalName(terminals: TerminalInstance[]): string {
 /**
  * Terminal Widget for Overview Sidebar
  * Combines WidgetCard header with terminal tabs and content
+ * Memoized to prevent re-renders when parent updates
  */
-export function TerminalWidget({
+export const TerminalWidget = memo(function TerminalWidget({
   chatId,
   cwd,
   workspaceId,
@@ -357,4 +358,4 @@ export function TerminalWidget({
       </div>
     </div>
   )
-}
+})

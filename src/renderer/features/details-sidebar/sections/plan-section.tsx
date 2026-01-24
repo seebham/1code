@@ -1,9 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef } from "react"
+import { useAtom } from "jotai"
 import { IconSpinner, PlanIcon } from "@/components/ui/icons"
 import { ChatMarkdownRenderer } from "@/components/chat-markdown-renderer"
 import { trpc } from "@/lib/trpc"
+import { planContentCacheAtomFamily } from "../atoms"
 
 interface PlanSectionProps {
   chatId: string
@@ -12,7 +14,12 @@ interface PlanSectionProps {
   isExpanded?: boolean
 }
 
-export function PlanSection({
+/**
+ * Plan Section for Details Sidebar
+ * Memoized to prevent re-renders when parent updates
+ * Uses caching to show content instantly when switching workspaces
+ */
+export const PlanSection = memo(function PlanSection({
   chatId,
   planPath,
   refetchTrigger,
@@ -23,6 +30,9 @@ export function PlanSection({
   const topGradientRef = useRef<HTMLDivElement>(null)
   const bottomGradientRef = useRef<HTMLDivElement>(null)
 
+  // Plan content cache to avoid flashing loading state
+  const [planCache, setPlanCache] = useAtom(planContentCacheAtomFamily(chatId))
+
   // Fetch plan file content using tRPC
   const {
     data: planContent,
@@ -30,6 +40,25 @@ export function PlanSection({
     error,
     refetch,
   } = trpc.files.readFile.useQuery({ filePath: planPath! }, { enabled: !!planPath })
+
+  // Update cache when content loads successfully
+  useEffect(() => {
+    if (planContent && planPath) {
+      setPlanCache({
+        content: planContent,
+        planPath,
+        isReady: true,
+      })
+    }
+  }, [planContent, planPath, setPlanCache])
+
+  // Clear cache when plan path changes to a different file
+  useEffect(() => {
+    if (planPath && planCache && planCache.planPath !== planPath) {
+      // Don't clear immediately - let new content load first
+      // This prevents flashing empty state
+    }
+  }, [planPath, planCache])
 
   // Refetch when trigger changes
   useEffect(() => {
@@ -73,14 +102,38 @@ export function PlanSection({
     updateScrollGradients()
   }, [planContent, updateScrollGradients])
 
+  // Use cached content while loading new content to prevent flashing
+  // Show cached content if: loading new content OR error occurred but we have cache
+  const displayContent = useMemo(() => {
+    // If we have fresh content, use it
+    if (planContent) return planContent
+    // If loading or error, use cached content (same plan path)
+    if (planCache?.isReady && planCache.planPath === planPath) {
+      return planCache.content
+    }
+    return null
+  }, [planContent, planCache, planPath])
+
+  // Only show loading if we have no content to display at all
+  const showLoading = isLoading && !displayContent
+
+  // Only show error if we have no content to display at all
+  const showError = error && !displayContent
+
   // Extract plan title from markdown (first H1)
   const planTitle = useMemo(() => {
-    if (!planContent) return "Plan"
-    const match = planContent.match(/^#\s+(.+)$/m)
+    if (!displayContent) return "Plan"
+    const match = displayContent.match(/^#\s+(.+)$/m)
     return match ? match[1] : "Plan"
-  }, [planContent])
+  }, [displayContent])
 
-  if (isLoading) {
+  // No plan path - don't render anything (parent should hide the widget)
+  if (!planPath) {
+    return null
+  }
+
+  // Show loading only if we have no cached content
+  if (showLoading) {
     return (
       <div className="flex items-center justify-center py-8">
         <IconSpinner className="h-5 w-5 text-muted-foreground" />
@@ -88,7 +141,8 @@ export function PlanSection({
     )
   }
 
-  if (error) {
+  // Show error only if we have no cached content
+  if (showError) {
     return (
       <div className="px-3 py-4 text-center">
         <p className="text-xs text-muted-foreground">
@@ -98,13 +152,9 @@ export function PlanSection({
     )
   }
 
-  if (!planPath) {
-    return (
-      <div className="px-3 py-4 text-center">
-        <PlanIcon className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
-        <p className="text-xs text-muted-foreground">No plan selected</p>
-      </div>
-    )
+  // No content at all (shouldn't happen if planPath is set)
+  if (!displayContent) {
+    return null
   }
 
   return (
@@ -127,7 +177,7 @@ export function PlanSection({
           className={`px-2 py-2 overflow-y-auto allow-text-selection ${isExpanded ? "" : "max-h-64"}`}
           data-plan-path={planPath}
         >
-          <ChatMarkdownRenderer content={planContent || ""} size="sm" />
+          <ChatMarkdownRenderer content={displayContent} size="sm" />
         </div>
 
         {/* Bottom scroll gradient */}
@@ -143,4 +193,4 @@ export function PlanSection({
       </div>
     </div>
   )
-}
+})

@@ -831,11 +831,12 @@ export function NewChatForm({
         },
       }))
 
-    // Add pasted text files as file mentions
+    // Add pasted text as pasted mentions (format: pasted:size:preview|filepath)
+    // Using | as separator since filepath can contain colons
     let finalMessage = message.trim()
     if (pastedTexts.length > 0) {
       const pastedMentions = pastedTexts
-        .map((pt) => `@[${MENTION_PREFIXES.FILE}local:${pt.filePath}]`)
+        .map((pt) => `@[${MENTION_PREFIXES.PASTED}${pt.size}:${pt.preview}|${pt.filePath}]`)
         .join(" ")
       finalMessage = pastedMentions + (finalMessage ? " " + finalMessage : "")
     }

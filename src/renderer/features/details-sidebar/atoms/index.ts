@@ -168,3 +168,30 @@ export const detailsSidebarWidthAtom = atomWithStorage<number>(
 // Focused section for "focus mode" (when a section needs more space like Diff)
 // null = normal mode, section name = focused mode
 export const focusedSectionAtom = atom<OverviewSection | null>(null)
+
+// ============================================================================
+// Plan Content Cache (per workspace) - prevents flashing loading states
+// ============================================================================
+
+export interface PlanContentCache {
+  content: string
+  planPath: string
+  // Track if content is ready (file loaded successfully)
+  isReady: boolean
+}
+
+// Runtime cache for plan content per workspace (not persisted)
+const planContentCacheStorageAtom = atom<Record<string, PlanContentCache | null>>({})
+
+export const planContentCacheAtomFamily = atomFamily((chatId: string) =>
+  atom(
+    (get) => get(planContentCacheStorageAtom)[chatId] ?? null,
+    (get, set, cache: PlanContentCache | null) => {
+      const current = get(planContentCacheStorageAtom)
+      set(planContentCacheStorageAtom, {
+        ...current,
+        [chatId]: cache,
+      })
+    },
+  ),
+)

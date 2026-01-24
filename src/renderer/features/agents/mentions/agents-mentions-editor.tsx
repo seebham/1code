@@ -42,6 +42,7 @@ export const MENTION_PREFIXES = {
   TOOL: "tool:", // MCP tools
   QUOTE: "quote:", // Selected text from assistant messages
   DIFF: "diff:", // Selected text from diff sidebar
+  PASTED: "pasted:", // Large pasted text saved as files
 } as const
 
 type TriggerPayload = {

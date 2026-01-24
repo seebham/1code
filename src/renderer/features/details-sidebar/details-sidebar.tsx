@@ -28,7 +28,7 @@ import {
 import { WidgetSettingsPopup } from "./widget-settings-popup"
 import { InfoSection } from "./sections/info-section"
 import { TodoWidget } from "./sections/todo-widget"
-import { PlanSection } from "./sections/plan-section"
+import { PlanWidget } from "./sections/plan-widget"
 import { TerminalWidget } from "./sections/terminal-widget"
 import { ChangesWidget } from "./sections/changes-widget"
 import type { ParsedDiffFile } from "./types"
@@ -336,40 +336,16 @@ export function DetailsSidebar({
                 // Hidden when Plan sidebar is open
                 if (!planPath || isPlanSidebarOpen) return null
                 return (
-                  <WidgetCard
+                  <PlanWidget
                     key="plan"
-                    widgetId="plan"
-                    title="Plan"
-                    hideExpand
-                    badge={
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={onExpandPlan}
-                          className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                        >
-                          View plan
-                        </Button>
-                        {isPlanMode && onBuildPlan && (
-                          <Button
-                            size="sm"
-                            onClick={onBuildPlan}
-                            className="h-5 px-2 text-[10px] font-medium rounded transition-transform duration-150 active:scale-[0.97]"
-                          >
-                            Approve
-                            <Kbd className="ml-1 text-primary-foreground/70">⌘↵</Kbd>
-                          </Button>
-                        )}
-                      </div>
-                    }
-                  >
-                    <PlanSection
-                      chatId={activeSubChatId || chatId}
-                      planPath={planPath}
-                      refetchTrigger={planRefetchTrigger}
-                    />
-                  </WidgetCard>
+                    chatId={chatId}
+                    activeSubChatId={activeSubChatId}
+                    planPath={planPath}
+                    refetchTrigger={planRefetchTrigger}
+                    isPlanMode={isPlanMode}
+                    onApprovePlan={onBuildPlan}
+                    onExpandPlan={onExpandPlan}
+                  />
                 )
 
               case "terminal":

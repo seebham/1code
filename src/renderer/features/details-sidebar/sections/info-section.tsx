@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { memo, useState, useCallback } from "react"
 import {
   GitBranchFilledIcon,
   FolderFilledIcon,
@@ -97,7 +97,12 @@ function PropertyRow({
   )
 }
 
-export function InfoSection({
+/**
+ * Info Section for Details Sidebar
+ * Shows workspace info: branch, PR, path
+ * Memoized to prevent re-renders when parent updates
+ */
+export const InfoSection = memo(function InfoSection({
   chatId,
   worktreePath,
   isExpanded = false,
@@ -203,4 +208,4 @@ export function InfoSection({
       )}
     </div>
   )
-}
+})

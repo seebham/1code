@@ -107,6 +107,7 @@ import {
   pendingBuildPlanSubChatIdAtom,
   pendingPlanApprovalsAtom,
   planEditRefetchTriggerAtomFamily,
+  workspaceDiffCacheAtomFamily,
   pendingPrMessageAtom,
   pendingReviewMessageAtom,
   pendingUserQuestionsAtom,
@@ -2806,6 +2807,14 @@ const ChatViewInner = memo(function ChatViewInner({
     // Update store mode synchronously BEFORE sending (transport reads from store)
     useAgentSubChatStore.getState().updateSubChatMode(subChatId, "agent")
 
+    // Sync mode to database for sidebar indicator (getPendingPlanApprovals)
+    if (!subChatId.startsWith("temp-")) {
+      updateSubChatModeMutation.mutate({ subChatId, mode: "agent" })
+    }
+
+    // Update ref BEFORE setIsPlanMode to prevent useEffect from triggering duplicate mutation
+    lastIsPlanModeRef.current = false
+
     // Update React state (for UI)
     setIsPlanMode(false)
 
@@ -2818,7 +2827,7 @@ const ChatViewInner = memo(function ChatViewInner({
       role: "user",
       parts: [{ type: "text", text: "Build plan" }],
     })
-  }, [subChatId, setIsPlanMode, scrollToBottom])
+  }, [subChatId, setIsPlanMode, scrollToBottom, updateSubChatModeMutation])
 
   // Handle pending "Build plan" from sidebar
   useEffect(() => {
@@ -3342,9 +3351,11 @@ const ChatViewInner = memo(function ChatViewInner({
         return `@[${MENTION_PREFIXES.DIFF}${dtc.filePath}:${lineNum}:${preview}:${encodedText}]`
       })
 
-      // Add pasted text files as file mentions (they are already saved as files)
+      // Add pasted text as pasted mentions (format: pasted:size:preview|filepath)
+      // Using | as separator since filepath can contain colons
       const pastedTextMentions = currentPastedTexts.map((pt) => {
-        return `@[${MENTION_PREFIXES.FILE}local:${pt.filePath}]`
+        // Preview is already truncated and has newlines replaced
+        return `@[${MENTION_PREFIXES.PASTED}${pt.size}:${pt.preview}|${pt.filePath}]`
       })
 
       mentionPrefix = [...quoteMentions, ...diffMentions, ...pastedTextMentions].join(" ") + " "
@@ -3632,20 +3643,14 @@ const ChatViewInner = memo(function ChatViewInner({
     }
   }
 
-  // Check if there's an unapproved plan (ExitPlanMode without subsequent "Build plan" or "Implement plan")
+  // Check if there's an unapproved plan (in plan mode with completed ExitPlanMode)
   const hasUnapprovedPlan = useMemo(() => {
-    // Traverse messages from end to find unapproved ExitPlanMode
+    // If already in agent mode, plan is approved (mode is the source of truth)
+    if (!isPlanMode) return false
+
+    // Look for completed ExitPlanMode in messages
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]
-
-      // If user message says "Build plan" or "Implement plan", plan is already approved
-      if (msg.role === "user") {
-        const text = msg.parts?.find((p: any) => p.type === "text")?.text || ""
-        const normalizedText = text.trim().toLowerCase()
-        if (normalizedText === "build plan" || normalizedText === "implement plan") {
-          return false
-        }
-      }
 
       // If assistant message with completed ExitPlanMode, we found an unapproved plan
       if (msg.role === "assistant" && msg.parts) {
@@ -3659,7 +3664,7 @@ const ChatViewInner = memo(function ChatViewInner({
       }
     }
     return false
-  }, [messages])
+  }, [messages, isPlanMode])
 
   // Keep ref in sync for use in initializeScroll (which runs in useLayoutEffect)
   hasUnapprovedPlanRef.current = hasUnapprovedPlan
@@ -4130,40 +4135,49 @@ export function ChatView({
     [chatId],
   )
   const [isTerminalSidebarOpen, setIsTerminalSidebarOpen] = useAtom(terminalSidebarAtom)
-  const [diffStats, setDiffStatsRaw] = useState({
-    fileCount: 0,
-    additions: 0,
-    deletions: 0,
-    isLoading: true,
-    hasChanges: false,
-  })
-  // Smart setter that only updates if values actually changed
+
+  // Diff data cache - stored in atoms to persist across workspace switches
+  const diffCacheAtom = useMemo(
+    () => workspaceDiffCacheAtomFamily(chatId),
+    [chatId],
+  )
+  const [diffCache, setDiffCache] = useAtom(diffCacheAtom)
+
+  // Extract diff data from cache
+  const diffStats = diffCache.diffStats
+  const parsedFileDiffs = diffCache.parsedFileDiffs as ParsedDiffFile[] | null
+  const prefetchedFileContents = diffCache.prefetchedFileContents
+  const diffContent = diffCache.diffContent
+
+  // Smart setters that update the cache
   const setDiffStats = useCallback((val: any) => {
-    setDiffStatsRaw((prev: typeof diffStats) => {
-      // Handle function updates
-      const newVal = typeof val === 'function' ? val(prev) : val
+    setDiffCache((prev) => {
+      const newVal = typeof val === 'function' ? val(prev.diffStats) : val
       // Only update if something changed
       if (
-        prev.fileCount === newVal.fileCount &&
-        prev.additions === newVal.additions &&
-        prev.deletions === newVal.deletions &&
-        prev.isLoading === newVal.isLoading &&
-        prev.hasChanges === newVal.hasChanges
+        prev.diffStats.fileCount === newVal.fileCount &&
+        prev.diffStats.additions === newVal.additions &&
+        prev.diffStats.deletions === newVal.deletions &&
+        prev.diffStats.isLoading === newVal.isLoading &&
+        prev.diffStats.hasChanges === newVal.hasChanges
       ) {
         return prev // Return same reference to prevent re-render
       }
-      return newVal
+      return { ...prev, diffStats: newVal }
     })
-  }, [])
-  // Store raw diff content to pass to AgentDiffView (avoids double fetch)
-  const [diffContent, setDiffContent] = useState<string | null>(null)
-  // Store pre-parsed file diffs (avoids double parsing in AgentDiffView)
-  // Server returns extended type with fileLang, isNewFile, isDeletedFile
-  const [parsedFileDiffs, setParsedFileDiffs] = useState<ParsedDiffFile[] | null>(null)
-  // Store prefetched file contents for instant diff view opening
-  const [prefetchedFileContents, setPrefetchedFileContents] = useState<
-    Record<string, string>
-  >({})
+  }, [setDiffCache])
+
+  const setParsedFileDiffs = useCallback((files: ParsedDiffFile[] | null) => {
+    setDiffCache((prev) => ({ ...prev, parsedFileDiffs: files as any }))
+  }, [setDiffCache])
+
+  const setPrefetchedFileContents = useCallback((contents: Record<string, string>) => {
+    setDiffCache((prev) => ({ ...prev, prefetchedFileContents: contents }))
+  }, [setDiffCache])
+
+  const setDiffContent = useCallback((content: string | null) => {
+    setDiffCache((prev) => ({ ...prev, diffContent: content }))
+  }, [setDiffCache])
   const [diffMode, setDiffMode] = useAtom(diffViewModeAtom)
   const [diffDisplayMode, setDiffDisplayMode] = useAtom(diffViewDisplayModeAtom)
   const subChatsSidebarMode = useAtomValue(agentsSubChatsSidebarModeAtom)

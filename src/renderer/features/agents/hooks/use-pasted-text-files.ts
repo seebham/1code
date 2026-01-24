@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from "react"
 import { trpc } from "../../../lib/trpc"
-import { toast } from "sonner"
 
 export interface PastedTextFile {
   id: string
@@ -48,14 +47,8 @@ export function usePastedTextFiles(subChatId: string): UsePastedTextFilesReturn 
         }
 
         setPastedTexts((prev) => [...prev, newPasted])
-
-        const sizeKB = Math.round(result.size / 1024)
-        toast.info(`Text saved as file (${sizeKB}KB)`, {
-          description: "Large text will be sent as a file attachment.",
-        })
       } catch (error) {
         console.error("[usePastedTextFiles] Failed to write:", error)
-        toast.error("Failed to save pasted text")
       }
     },
     [subChatId, writePastedTextMutation]

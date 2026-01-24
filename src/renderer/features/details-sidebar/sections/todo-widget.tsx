@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useCallback } from "react"
+import { memo, useMemo, useState, useCallback } from "react"
 import { useAtomValue } from "jotai"
 import { cn } from "@/lib/utils"
 import { PlanIcon, CheckIcon, IconArrowRight, ExpandIcon, CollapseIcon } from "@/components/ui/icons"
@@ -156,8 +156,9 @@ const TodoListItem = ({
  * To-do list Widget for Overview Sidebar
  * Shows active todos from selected sub-chat
  * Matches the visual style of AgentTodoTool exactly
+ * Memoized to prevent re-renders when parent updates
  */
-export function TodoWidget({ subChatId }: TodoWidgetProps) {
+export const TodoWidget = memo(function TodoWidget({ subChatId }: TodoWidgetProps) {
   // Get todos from the active sub-chat
   const todosAtom = useMemo(
     () => currentTodosAtomFamily(subChatId || "default"),
@@ -305,4 +306,4 @@ export function TodoWidget({ subChatId }: TodoWidgetProps) {
       </div>
     </div>
   )
-}
+})

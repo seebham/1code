@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useAtom } from "jotai"
-import { Settings, GripVertical, Box, TerminalSquare, ListTodo } from "lucide-react"
+import { GripVertical, Box, TerminalSquare, ListTodo } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Popover,
@@ -150,11 +150,10 @@ export function WidgetSettingsPopup({ workspaceId }: WidgetSettingsPopupProps) {
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
-          size="icon"
-          className="h-6 w-6 p-0 hover:bg-foreground/10 transition-colors text-muted-foreground hover:text-foreground rounded-md"
-          aria-label="Widget settings"
+          size="sm"
+          className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/10 transition-colors rounded-md"
         >
-          <Settings className="h-4 w-4" />
+          Edit widgets
         </Button>
       </PopoverTrigger>
       <PopoverContent

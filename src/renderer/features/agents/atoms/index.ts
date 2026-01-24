@@ -259,7 +259,7 @@ export type DiffViewDisplayMode = "side-peek" | "center-peek" | "full-page"
 
 export const diffViewDisplayModeAtom = atomWithStorage<DiffViewDisplayMode>(
   "agents:diffViewDisplayMode",
-  "side-peek", // default to current behavior
+  "center-peek", // default to dialog for new users
   undefined,
   { getOnInit: true },
 )
@@ -702,6 +702,75 @@ export const planEditRefetchTriggerAtomFamily = atomFamily((chatId: string) =>
       const current = get(planEditRefetchTriggerStorageAtom)
       const currentValue = current[chatId] ?? 0
       set(planEditRefetchTriggerStorageAtom, { ...current, [chatId]: currentValue + 1 })
+    },
+  ),
+)
+
+// ============================================================================
+// Diff Data Cache (per workspace) - prevents data loss when switching workspaces
+// ============================================================================
+
+// ParsedDiffFile type (same as in shared/changes-types.ts but avoiding import cycle)
+export interface CachedParsedDiffFile {
+  key: string
+  oldPath: string
+  newPath: string
+  diffText: string
+  isBinary: boolean
+  additions: number
+  deletions: number
+  isValid: boolean
+  fileLang: string | null
+  isNewFile: boolean
+  isDeletedFile: boolean
+}
+
+export interface DiffStatsCache {
+  fileCount: number
+  additions: number
+  deletions: number
+  isLoading: boolean
+  hasChanges: boolean
+}
+
+export interface WorkspaceDiffCache {
+  parsedFileDiffs: CachedParsedDiffFile[] | null
+  diffStats: DiffStatsCache
+  prefetchedFileContents: Record<string, string>
+  diffContent: string | null
+}
+
+// Default stats for loading state
+const DEFAULT_DIFF_STATS: DiffStatsCache = {
+  fileCount: 0,
+  additions: 0,
+  deletions: 0,
+  isLoading: true,
+  hasChanges: false,
+}
+
+// Runtime cache for diff data per workspace (not persisted)
+const workspaceDiffCacheStorageAtom = atom<Record<string, WorkspaceDiffCache>>({})
+
+// Default cache value
+const DEFAULT_DIFF_CACHE: WorkspaceDiffCache = {
+  parsedFileDiffs: null,
+  diffStats: DEFAULT_DIFF_STATS,
+  prefetchedFileContents: {},
+  diffContent: null,
+}
+
+export const workspaceDiffCacheAtomFamily = atomFamily((chatId: string) =>
+  atom(
+    (get) => get(workspaceDiffCacheStorageAtom)[chatId] ?? DEFAULT_DIFF_CACHE,
+    (get, set, update: WorkspaceDiffCache | ((prev: WorkspaceDiffCache) => WorkspaceDiffCache)) => {
+      const current = get(workspaceDiffCacheStorageAtom)
+      const prevCache = current[chatId] ?? DEFAULT_DIFF_CACHE
+      const newCache = typeof update === 'function' ? update(prevCache) : update
+      set(workspaceDiffCacheStorageAtom, {
+        ...current,
+        [chatId]: newCache,
+      })
     },
   ),
 )

@@ -1,17 +1,10 @@
 "use client"
 
-import { useCallback, useState, useEffect } from "react"
+import { memo, useCallback, useState, useEffect } from "react"
 import { useAtom } from "jotai"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu"
-import { ArrowUpRight, Eye } from "lucide-react"
+import { ArrowUpRight } from "lucide-react"
 import { DiffIcon } from "@/components/ui/icons"
 import {
   Tooltip,
@@ -21,7 +14,11 @@ import {
 import { Kbd } from "@/components/ui/kbd"
 import { cn } from "@/lib/utils"
 import { viewedFilesAtomFamily } from "@/features/agents/atoms"
-import { getStatusIndicator } from "@/features/changes/utils"
+import {
+  FileListItem,
+  getFileName,
+  getFileDir,
+} from "@/features/changes/components/file-list-item"
 import { trpc } from "@/lib/trpc"
 import type { ParsedDiffFile } from "../types"
 
@@ -40,36 +37,30 @@ interface ChangesWidgetProps {
 }
 
 /**
- * Get file name from path
- */
-function getFileName(path: string): string {
-  const parts = path.split("/")
-  return parts[parts.length - 1] || path
-}
-
-/**
- * Get file directory from path
- */
-function getFileDir(path: string): string {
-  const parts = path.split("/")
-  if (parts.length <= 1) return ""
-  return parts.slice(0, -1).join("/")
-}
-
-/**
  * Map parsed diff file status to FileStatus type for getStatusIndicator
  */
-function getFileStatus(file: ParsedDiffFile): "added" | "modified" | "deleted" {
+function getFileStatus(file: ParsedDiffFile): "added" | "modified" | "deleted" | "renamed" {
   if (file.isNewFile) return "added"
   if (file.isDeletedFile) return "deleted"
+  // Check for rename: oldPath and newPath are different and neither is /dev/null
+  if (
+    file.oldPath &&
+    file.newPath &&
+    file.oldPath !== "/dev/null" &&
+    file.newPath !== "/dev/null" &&
+    file.oldPath !== file.newPath
+  ) {
+    return "renamed"
+  }
   return "modified"
 }
 
 /**
  * Changes Widget for Overview Sidebar
  * Shows file list exactly like the Changes tab in diff sidebar
+ * Memoized to prevent unnecessary re-renders when parent updates
  */
-export function ChangesWidget({
+export const ChangesWidget = memo(function ChangesWidget({
   chatId,
   worktreePath,
   diffStats,
@@ -80,7 +71,12 @@ export function ChangesWidget({
   onFileSelect,
   diffDisplayMode = "side-peek",
 }: ChangesWidgetProps) {
-  const hasChanges = diffStats && diffStats.fileCount > 0
+  // Data is now cached at the ActiveChat level via workspaceDiffCacheAtomFamily
+  // So parsedFileDiffs and diffStats persist across workspace switches
+  const displayFiles = parsedFileDiffs ?? []
+  const displayStats = diffStats
+
+  const hasChanges = displayStats && displayStats.fileCount > 0
 
   // Get tooltip text based on diff display mode
   const expandTooltip = diffDisplayMode === "side-peek"
@@ -88,7 +84,6 @@ export function ChangesWidget({
     : diffDisplayMode === "center-peek"
       ? "Open in dialog"
       : "Open fullscreen"
-  const files = parsedFileDiffs ?? []
 
   // Viewed files state (same atom as diff sidebar)
   const [viewedFiles] = useAtom(viewedFilesAtomFamily(chatId))
@@ -100,22 +95,33 @@ export function ChangesWidget({
   const [selectedForCommit, setSelectedForCommit] = useState<Set<string>>(new Set())
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false)
 
+  // Helper to get display path (handles /dev/null for deleted files)
+  const getDisplayPath = useCallback((file: ParsedDiffFile): string => {
+    if (file.newPath && file.newPath !== "/dev/null") {
+      return file.newPath
+    }
+    if (file.oldPath && file.oldPath !== "/dev/null") {
+      return file.oldPath
+    }
+    return file.newPath || file.oldPath
+  }, [])
+
   // Initialize selection - select all files by default when data loads
   useEffect(() => {
-    if (!hasInitializedSelection && files.length > 0) {
-      const allPaths = new Set(files.map((f) => f.newPath || f.oldPath))
+    if (!hasInitializedSelection && displayFiles.length > 0) {
+      const allPaths = new Set(displayFiles.map((f) => getDisplayPath(f)))
       setSelectedForCommit(allPaths)
       setHasInitializedSelection(true)
     }
-  }, [files, hasInitializedSelection])
+  }, [displayFiles, hasInitializedSelection, getDisplayPath])
 
   // Reset selection when files change significantly
   useEffect(() => {
-    if (files.length === 0) {
+    if (displayFiles.length === 0) {
       setHasInitializedSelection(false)
       setSelectedForCommit(new Set())
     }
-  }, [files.length])
+  }, [displayFiles.length])
 
   // Check if file is marked as viewed
   const isFileMarkedAsViewed = useCallback(
@@ -149,30 +155,30 @@ export function ChangesWidget({
     })
   }, [])
 
-  // Selection stats
-  const selectedCount = files.filter((f) =>
-    selectedForCommit.has(f.newPath || f.oldPath),
+  // Selection stats - use getDisplayPath consistently for all path operations
+  const selectedCount = displayFiles.filter((f) =>
+    selectedForCommit.has(getDisplayPath(f)),
   ).length
-  const allSelected = files.length > 0 && selectedCount === files.length
-  const someSelected = selectedCount > 0 && selectedCount < files.length
+  const allSelected = displayFiles.length > 0 && selectedCount === displayFiles.length
+  const someSelected = selectedCount > 0 && selectedCount < displayFiles.length
 
   // Toggle all files selection
   const handleSelectAllChange = useCallback(() => {
     if (allSelected) {
       setSelectedForCommit(new Set())
     } else {
-      const allPaths = new Set(files.map((f) => f.newPath || f.oldPath))
+      const allPaths = new Set(displayFiles.map((f) => getDisplayPath(f)))
       setSelectedForCommit(allPaths)
     }
-  }, [allSelected, files])
+  }, [allSelected, displayFiles, getDisplayPath])
 
   // Handle commit
   const handleCommit = useCallback(() => {
-    const selectedPaths = files
-      .filter((f) => selectedForCommit.has(f.newPath || f.oldPath))
-      .map((f) => f.newPath || f.oldPath)
+    const selectedPaths = displayFiles
+      .filter((f) => selectedForCommit.has(getDisplayPath(f)))
+      .map((f) => getDisplayPath(f))
     onCommit?.(selectedPaths)
-  }, [files, selectedForCommit, onCommit])
+  }, [displayFiles, selectedForCommit, onCommit, getDisplayPath])
 
   return (
     <div className="mx-2 mb-2">
@@ -186,11 +192,11 @@ export function ChangesWidget({
           <span className="text-xs font-medium text-foreground">Changes</span>
 
           {/* Stats in header - total lines changed */}
-          {hasChanges && (
+          {hasChanges && displayStats && (
             <span className="text-xs text-muted-foreground">
-              <span className="text-green-500">+{diffStats.additions}</span>
+              <span className="text-green-500">+{displayStats.additions}</span>
               {" "}
-              <span className="text-red-500">-{diffStats.deletions}</span>
+              <span className="text-red-500">-{displayStats.deletions}</span>
             </span>
           )}
 
@@ -230,118 +236,46 @@ export function ChangesWidget({
                 className="size-4 border-muted-foreground/50"
               />
               <span className="text-xs text-muted-foreground">
-                {selectedCount} of {files.length} file
-                {files.length !== 1 ? "s" : ""} selected
+                {selectedCount} of {displayFiles.length} file
+                {displayFiles.length !== 1 ? "s" : ""} selected
               </span>
             </div>
 
-            {/* File list - same style as changes-view */}
+            {/* File list - using shared FileListItem component */}
             <div className="max-h-[300px] overflow-y-auto">
-              {files.map((file) => {
-                const filePath = file.newPath || file.oldPath
-                const fileName = getFileName(filePath)
-                const dirPath = getFileDir(filePath)
-                const isViewed = isFileMarkedAsViewed(filePath)
-                const isChecked = selectedForCommit.has(filePath)
-                const status = getFileStatus(file)
+              {displayFiles.map((file) => {
+                const filePath = getDisplayPath(file)
                 const absolutePath = worktreePath ? `${worktreePath}/${filePath}` : null
 
-                const handleCopyPath = async () => {
-                  if (absolutePath) {
-                    await navigator.clipboard.writeText(absolutePath)
-                  }
-                }
-
-                const handleCopyRelativePath = async () => {
-                  await navigator.clipboard.writeText(filePath)
-                }
-
-                const handleRevealInFinder = () => {
-                  if (absolutePath) {
-                    openInFinderMutation.mutate(absolutePath)
-                  }
-                }
-
-                const isUntracked = file.isNewFile
-
-                const handleFileClick = () => {
-                  if (onFileSelect) {
-                    onFileSelect(filePath)
-                  } else {
-                    onExpand?.()
-                  }
-                }
-
-                const fileRowContent = (
-                  <div
-                    className={cn(
-                      "flex items-center gap-2 px-2 py-1 cursor-pointer",
-                      "hover:bg-muted/80 transition-colors",
-                    )}
-                    onClick={handleFileClick}
-                  >
-                    {/* Checkbox for selection */}
-                    <Checkbox
-                      checked={isChecked}
-                      onCheckedChange={() => handleCheckboxChange(filePath)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="size-4 shrink-0 border-muted-foreground/50"
-                    />
-
-                    {/* File path - dir + name inline */}
-                    <div className="flex-1 min-w-0 flex items-center overflow-hidden">
-                      {dirPath && (
-                        <span className="text-xs text-muted-foreground truncate flex-shrink min-w-0">
-                          {dirPath}/
-                        </span>
-                      )}
-                      <span className="text-xs font-medium flex-shrink-0 whitespace-nowrap">
-                        {fileName}
-                      </span>
-                    </div>
-
-                    {/* Status indicators */}
-                    <div className="shrink-0 flex items-center gap-1.5">
-                      {/* Viewed indicator */}
-                      {isViewed && (
-                        <div className="size-4 rounded bg-emerald-500/20 flex items-center justify-center">
-                          <Eye className="size-2.5 text-emerald-500" />
-                        </div>
-                      )}
-                      {/* Git status icon */}
-                      {getStatusIndicator(status)}
-                    </div>
-                  </div>
-                )
-
-                // Without worktree path, just render the row with key
-                if (!worktreePath) {
-                  return <div key={file.key}>{fileRowContent}</div>
-                }
-
-                // With worktree path, wrap in context menu
                 return (
-                  <ContextMenu key={file.key}>
-                    <ContextMenuTrigger asChild>{fileRowContent}</ContextMenuTrigger>
-                    <ContextMenuContent className="w-48">
-                      <ContextMenuItem onClick={handleCopyPath}>
-                        Copy Path
-                      </ContextMenuItem>
-                      <ContextMenuItem onClick={handleCopyRelativePath}>
-                        Copy Relative Path
-                      </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem onClick={handleRevealInFinder}>
-                        Reveal in Finder
-                      </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem
-                        className="data-[highlighted]:bg-red-500/15 data-[highlighted]:text-red-400"
-                      >
-                        {isUntracked ? "Delete File..." : "Discard Changes..."}
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
+                  <FileListItem
+                    key={file.key}
+                    filePath={filePath}
+                    fileName={getFileName(filePath)}
+                    dirPath={getFileDir(filePath)}
+                    status={getFileStatus(file)}
+                    isChecked={selectedForCommit.has(filePath)}
+                    isViewed={isFileMarkedAsViewed(filePath)}
+                    isUntracked={file.isNewFile ?? false}
+                    showContextMenu={!!worktreePath}
+                    onSelect={() => {
+                      if (onFileSelect) {
+                        onFileSelect(filePath)
+                      } else {
+                        onExpand?.()
+                      }
+                    }}
+                    onCheckboxChange={() => handleCheckboxChange(filePath)}
+                    onCopyPath={absolutePath ? async () => {
+                      await navigator.clipboard.writeText(absolutePath)
+                    } : undefined}
+                    onCopyRelativePath={async () => {
+                      await navigator.clipboard.writeText(filePath)
+                    }}
+                    onRevealInFinder={absolutePath ? () => {
+                      openInFinderMutation.mutate(absolutePath)
+                    } : undefined}
+                  />
                 )
               })}
             </div>
@@ -380,4 +314,4 @@ export function ChangesWidget({
       </div>
     </div>
   )
-}
+})
