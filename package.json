@@ -167,6 +167,10 @@
       {
         "from": "resources/bin/VERSION",
         "to": "bin/VERSION"
+      },
+      {
+        "from": "build/icons",
+        "to": "icons"
       }
     ],
     "asar": true,

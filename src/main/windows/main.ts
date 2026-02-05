@@ -538,6 +538,7 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
     minHeight: 600,
     show: false,
     title: "1Code",
+    icon: process.platform !== "darwin" ? nativeImage.createFromPath(join(__dirname, "../../resources/icons/icon512.png")) : undefined,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#09090b" : "#ffffff",
     // hiddenInset shows native traffic lights inset in the window
     // hiddenInset hides the native title bar but keeps traffic lights visible
