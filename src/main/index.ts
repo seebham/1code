@@ -61,8 +61,8 @@ if (process.platform === "linux" && process.env.WAYLAND_DISPLAY) {
 
 // Linux: ensure WM_CLASS and app name match desktop entry for dock icon
 if (process.platform === "linux") {
-  app.setName("1Code")
-  app.commandLine.appendSwitch("class", "1Code")
+  app.setName("1code")
+  app.commandLine.appendSwitch("class", "1code")
 }
 
 // Initialize Sentry before app is ready (production only)

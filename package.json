@@ -1,5 +1,5 @@
 {
-  "name": "1Code",
+  "name": "1code",
   "version": "0.0.56",
   "private": true,
   "description": "1Code - UI for parallel work with AI agents",
@@ -135,7 +135,7 @@
   },
   "build": {
     "appId": "dev.21st.agents",
-    "productName": "1Code",
+    "productName": "1code",
     "npmRebuild": true,
     "protocols": [
       {
@@ -241,7 +241,7 @@
       "icon": "build/icons",
       "category": "Development",
       "desktop": {
-        "StartupWMClass": "1Code"
+        "StartupWMClass": "1code"
       }
     },
     "nsis": {
