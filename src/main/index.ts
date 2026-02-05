@@ -59,6 +59,12 @@ if (process.platform === "linux" && process.env.WAYLAND_DISPLAY) {
   console.log("[App] Wayland platform enabled")
 }
 
+// Linux: ensure WM_CLASS and app name match desktop entry for dock icon
+if (process.platform === "linux") {
+  app.setName("1Code")
+  app.commandLine.appendSwitch("class", "1Code")
+}
+
 // Initialize Sentry before app is ready (production only)
 if (app.isPackaged && !IS_DEV) {
   const sentryDsn = import.meta.env.MAIN_VITE_SENTRY_DSN

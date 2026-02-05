@@ -1,5 +1,5 @@
 {
-  "name": "21st-desktop",
+  "name": "1Code",
   "version": "0.0.55",
   "private": true,
   "description": "1Code - UI for parallel work with AI agents",
@@ -239,7 +239,10 @@
         "deb"
       ],
       "icon": "build/icons",
-      "category": "Development"
+      "category": "Development",
+      "desktop": {
+        "StartupWMClass": "1Code"
+      }
     },
     "nsis": {
       "oneClick": false,
