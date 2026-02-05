@@ -51,6 +51,14 @@ if (IS_DEV) {
   console.log("[Dev] Using separate userData path:", devUserData)
 }
 
+// Enable Wayland support on Linux
+// Use Wayland if available (WAYLAND_DISPLAY env var is set)
+// This must be set before app is ready
+if (process.platform === "linux" && process.env.WAYLAND_DISPLAY) {
+  app.commandLine.appendSwitch("ozone-platform", "wayland")
+  console.log("[App] Wayland platform enabled")
+}
+
 // Initialize Sentry before app is ready (production only)
 if (app.isPackaged && !IS_DEV) {
   const sentryDsn = import.meta.env.MAIN_VITE_SENTRY_DSN
