@@ -549,6 +549,11 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
       frame: useNativeFrame,
       autoHideMenuBar: true,
     }),
+    // Linux: Use frameless with custom titlebar for better Wayland compatibility
+    ...(process.platform === "linux" && {
+      frame: false,
+      autoHideMenuBar: true,
+    }),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       nodeIntegration: false,

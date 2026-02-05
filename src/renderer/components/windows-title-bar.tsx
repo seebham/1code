@@ -5,10 +5,11 @@ import { Minus, Square, X } from "lucide-react"
 import { Button } from "./ui/button"
 
 /**
- * Windows title bar component for frameless windows
+ * Title bar component for frameless windows
  * Provides window controls (minimize, maximize, close) and drag region
  *
- * Only shown on Windows when using frameless window (useNativeFrame = false)
+ * Shown on Windows when using frameless window (useNativeFrame = false)
+ * Shown on Linux with Wayland (frameless for better compatibility)
  */
 export function WindowsTitleBar() {
   const [isMaximized, setIsMaximized] = useState(false)
@@ -16,6 +17,8 @@ export function WindowsTitleBar() {
 
   const isWindows =
     typeof window !== "undefined" && window.desktopApi?.platform === "win32"
+  const isLinux =
+    typeof window !== "undefined" && window.desktopApi?.platform === "linux"
 
   // Check actual window frame state
   useEffect(() => {
@@ -49,8 +52,8 @@ export function WindowsTitleBar() {
     return () => window.removeEventListener("focus", handleFocus)
   }, [isWindows])
 
-  // Don't render on non-Windows or when using native frame
-  if (!isWindows || hasNativeFrame) return null
+  // Don't render on non-Windows/Linux or when using native frame
+  if ((!isWindows && !isLinux) || (isWindows && hasNativeFrame)) return null
 
   const handleMinimize = async () => {
     await window.desktopApi?.windowMinimize()
