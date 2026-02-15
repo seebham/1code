@@ -4,10 +4,9 @@ import { useAtomValue } from "jotai"
 import { ListTree } from "lucide-react"
 import { memo, useCallback, useContext, useMemo, useState } from "react"
 
-import { CollapseIcon, ExpandIcon, IconTextUndo, PlanIcon } from "../../../components/ui/icons"
+import { CollapseIcon, ExpandIcon, PlanIcon } from "../../../components/ui/icons"
 import { TextShimmer } from "../../../components/ui/text-shimmer"
 import { cn } from "../../../lib/utils"
-import { isRollingBackAtom, rollbackHandlerAtom } from "../stores/message-store"
 import { selectedProjectAtom, showMessageJsonAtom } from "../atoms"
 import { MessageJsonDisplay } from "../ui/message-json-display"
 import { AgentAskUserQuestionTool } from "../ui/agent-ask-user-question-tool"
@@ -35,6 +34,7 @@ import {
   getMessageTextContent,
 } from "../ui/message-action-buttons"
 import { useFileOpen } from "../mentions"
+import { GitActivityBadges } from "../ui/git-activity-badges"
 import { MemoizedTextPart } from "./memoized-text-part"
 
 // Exploring tools - these get grouped when 3+ consecutive
@@ -276,8 +276,6 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
   chatId,
   sandboxSetupStatus = "ready",
 }: AssistantMessageItemProps) {
-  const onRollback = useAtomValue(rollbackHandlerAtom)
-  const isRollingBack = useAtomValue(isRollingBackAtom)
   const showMessageJson = useAtomValue(showMessageJsonAtom)
   const selectedProject = useAtomValue(selectedProjectAtom)
   const projectPath = selectedProject?.path
@@ -722,23 +720,13 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
               text={getMessageTextContent(message)}
               isMobile={isMobile}
             />
-            {onRollback && (message.metadata as any)?.sdkMessageUuid && (
-              <button
-                onClick={() => onRollback(message)}
-                disabled={isStreaming || isRollingBack}
-                tabIndex={-1}
-                className={cn(
-                  "p-1.5 rounded-md transition-[background-color,transform] duration-150 ease-out hover:bg-accent active:scale-[0.97]",
-                  (isStreaming || isRollingBack) && "opacity-50 cursor-not-allowed",
-                )}
-              >
-                <IconTextUndo className="w-3.5 h-3.5 text-muted-foreground" />
-              </button>
-            )}
           </div>
           <AgentMessageUsage metadata={msgMetadata} isStreaming={isStreaming} isMobile={isMobile} />
         </div>
       )}
+
+      {/* Git activity badges - commit/PR pills */}
+      {(!isStreaming || !isLastMessage) && <GitActivityBadges parts={messageParts} chatId={chatId} subChatId={subChatId} />}
 
       {isDev && showMessageJson && (
         <div className="px-2 mt-2">

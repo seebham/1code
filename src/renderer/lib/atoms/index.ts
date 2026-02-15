@@ -364,7 +364,7 @@ export const activeConfigAtom = atom((get) => {
 // Note: Extended thinking disables response streaming
 export const extendedThinkingEnabledAtom = atomWithStorage<boolean>(
   "preferences:extended-thinking-enabled",
-  false,
+  true,
   undefined,
   { getOnInit: true },
 )
@@ -373,7 +373,7 @@ export const extendedThinkingEnabledAtom = atomWithStorage<boolean>(
 // When enabled, allow rollback to previous assistant messages
 export const historyEnabledAtom = atomWithStorage<boolean>(
   "preferences:history-enabled",
-  false,
+  false, // Default OFF — beta feature
   undefined,
   { getOnInit: true },
 )
@@ -426,11 +426,11 @@ export const betaGitFeaturesEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true },
 )
 
-// Beta: Enable Kanban board view
+// Kanban board view
 // When enabled, shows Kanban button in sidebar to view workspaces as a board
 export const betaKanbanEnabledAtom = atomWithStorage<boolean>(
   "preferences:beta-kanban-enabled",
-  false, // Default OFF
+  true, // Default ON — graduated from beta
   undefined,
   { getOnInit: true },
 )

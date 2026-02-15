@@ -131,6 +131,10 @@ contextBridge.exposeInMainWorld("desktopApi", {
   clipboardWrite: (text: string) => ipcRenderer.invoke("clipboard:write", text),
   clipboardRead: () => ipcRenderer.invoke("clipboard:read"),
 
+  // Save file with native dialog
+  saveFile: (options: { base64Data: string; filename: string; filters?: { name: string; extensions: string[] }[] }) =>
+    ipcRenderer.invoke("dialog:save-file", options) as Promise<{ success: boolean; filePath?: string }>,
+
   // Auth methods
   getUser: () => ipcRenderer.invoke("auth:get-user"),
   isAuthenticated: () => ipcRenderer.invoke("auth:is-authenticated"),
@@ -212,6 +216,13 @@ contextBridge.exposeInMainWorld("desktopApi", {
     const handler = (_event: unknown, data: { worktreePath: string; changes: Array<{ path: string; type: "add" | "change" | "unlink" }> }) => callback(data)
     ipcRenderer.on("git:status-changed", handler)
     return () => ipcRenderer.removeListener("git:status-changed", handler)
+  },
+
+  // Worktree setup failure events
+  onWorktreeSetupFailed: (callback: (data: { kind: "create-failed" | "setup-failed"; message: string; projectId: string }) => void) => {
+    const handler = (_event: unknown, data: { kind: "create-failed" | "setup-failed"; message: string; projectId: string }) => callback(data)
+    ipcRenderer.on("worktree:setup-failed", handler)
+    return () => ipcRenderer.removeListener("worktree:setup-failed", handler)
   },
 
   // Subscribe to git watcher for a worktree (from renderer)
@@ -308,6 +319,7 @@ export interface DesktopApi {
   getApiBaseUrl: () => Promise<string>
   clipboardWrite: (text: string) => Promise<void>
   clipboardRead: () => Promise<string>
+  saveFile: (options: { base64Data: string; filename: string; filters?: { name: string; extensions: string[] }[] }) => Promise<{ success: boolean; filePath?: string }>
   // Auth
   getUser: () => Promise<{
     id: string
