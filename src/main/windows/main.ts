@@ -1,5 +1,6 @@
 import {
   BrowserWindow,
+  Notification,
   shell,
   nativeTheme,
   ipcMain,
@@ -100,18 +101,26 @@ function registerIpcHandlers(): void {
     "app:show-notification",
     (event, options: { title: string; body: string }) => {
       try {
-        const { Notification } = require("electron")
-        const iconPath = join(__dirname, "../../../build/icon.ico")
-        const icon = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined
+        if (!Notification.isSupported()) {
+          console.warn("[Main] Notifications not supported on this system")
+          return
+        }
+
+        // On macOS, the app icon is used automatically — no custom icon needed.
+        // On Windows, use .ico; on Linux, use .png.
+        let icon: Electron.NativeImage | undefined
+        if (process.platform !== "darwin") {
+          const ext = process.platform === "win32" ? "icon.ico" : "icon.png"
+          const iconPath = join(__dirname, "../../build", ext)
+          icon = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined
+        }
 
         const notification = new Notification({
           title: options.title,
           body: options.body,
-          icon,
+          ...(icon && { icon }),
           ...(process.platform === "win32" && { silent: false }),
         })
-
-        notification.show()
 
         notification.on("click", () => {
           const win = getWindowFromEvent(event)
@@ -120,6 +129,8 @@ function registerIpcHandlers(): void {
             win.focus()
           }
         })
+
+        notification.show()
       } catch (error) {
         console.error("[Main] Failed to show notification:", error)
       }
@@ -197,7 +208,36 @@ function registerIpcHandlers(): void {
 
   // New window - optionally open with specific chat/subchat
   ipcMain.handle("window:new", (_event, options?: { chatId?: string; subChatId?: string }) => {
-    createWindow(options)
+    // If chatId specified, check ownership atomically via focusChatOwner
+    if (options?.chatId && windowManager.focusChatOwner(options.chatId)) {
+      return { blocked: true }
+    }
+
+    const win = createWindow(options)
+
+    // Pre-claim the chat for the new window
+    if (options?.chatId) {
+      windowManager.claimChat(options.chatId, win.id)
+    }
+
+    return { blocked: false }
+  })
+
+  // Chat ownership — prevent same chat open in multiple windows
+  ipcMain.handle("chat:claim", (event, chatId: string) => {
+    const win = getWindowFromEvent(event)
+    if (!win) return { ok: false, ownerStableId: "unknown" }
+    return windowManager.claimChat(chatId, win.id)
+  })
+
+  ipcMain.handle("chat:release", (event, chatId: string) => {
+    const win = getWindowFromEvent(event)
+    if (!win) return
+    windowManager.releaseChat(chatId, win.id)
+  })
+
+  ipcMain.handle("chat:focus-owner", (_event, chatId: string) => {
+    return windowManager.focusChatOwner(chatId)
   })
 
   // Set window title
@@ -627,9 +667,10 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
   // Show window when ready
   window.on("ready-to-show", () => {
     console.log("[Main] Window", window.id, "ready to show")
-    // Always show native macOS traffic lights
+    // Start with traffic lights hidden - the renderer will show them
+    // after hydration based on the persisted sidebar state
     if (process.platform === "darwin") {
-      window.setWindowButtonVisibility(true)
+      window.setWindowButtonVisibility(false)
     }
     window.show()
   })
@@ -643,10 +684,9 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
     window.webContents.send("window:fullscreen-change", true)
   })
   window.on("leave-full-screen", () => {
-    // Show native traffic lights when exiting fullscreen
-    if (process.platform === "darwin") {
-      window.setWindowButtonVisibility(true)
-    }
+    // Don't force traffic lights visible here - the renderer will
+    // restore the correct visibility based on sidebar state when
+    // it receives the fullscreen-change event
     window.webContents.send("window:fullscreen-change", false)
   })
 
@@ -733,12 +773,9 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
     }
   }
 
-  // Ensure native traffic lights are visible after page load
+  // Log page load - traffic light visibility is managed by the renderer
   window.webContents.on("did-finish-load", () => {
     console.log("[Main] Page finished loading in window", window.id)
-    if (process.platform === "darwin") {
-      window.setWindowButtonVisibility(true)
-    }
   })
   window.webContents.on(
     "did-fail-load",

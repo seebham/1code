@@ -34,6 +34,7 @@ const SHORTCUT_TO_ACTION_MAP: Record<ShortcutActionId, string> = {
   "quick-switch-workspaces": "quick-switch-workspaces",
   "open-kanban": "open-kanban",
   "new-agent": "create-new-agent",
+  "new-agent-split": "create-new-agent-split",
   "search-chats": "search-chats",
   "search-in-chat": "toggle-chat-search",
   "archive-agent": "archive-agent",
@@ -182,6 +183,19 @@ export function useAgentsHotkeys(
     const cleanup = window.desktopApi.onShortcutNewAgent(() => {
       console.log("[Hotkey] Cmd+N received via IPC, executing create-new-agent")
       handleHotkeyAction("create-new-agent")
+    })
+
+    return cleanup
+  }, [enabled, handleHotkeyAction])
+
+  // Listen for Cmd+, via IPC from main process (menu accelerator)
+  React.useEffect(() => {
+    if (!enabled) return
+    if (!window.desktopApi?.onShortcutOpenSettings) return
+
+    const cleanup = window.desktopApi.onShortcutOpenSettings(() => {
+      console.log("[Hotkey] Cmd+, received via IPC, executing open-settings")
+      handleHotkeyAction("open-settings")
     })
 
     return cleanup

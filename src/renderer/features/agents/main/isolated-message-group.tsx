@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useMemo } from "react"
+import { createContext, memo, useMemo } from "react"
 import { useAtomValue } from "jotai"
 import {
   messageAtomFamily,
@@ -16,6 +16,9 @@ import { AgentImageItem } from "../ui/agent-image-item"
 import { IconTextUndo } from "../../../components/ui/icons"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip"
 import { cn } from "../../../lib/utils"
+
+// Context for fork callback - avoids threading props through MemoizedAssistantMessages
+export const ForkContext = createContext<((messageId: string) => void) | null>(null)
 
 // ============================================================================
 // ISOLATED MESSAGE GROUP (LAYER 4)
@@ -44,6 +47,7 @@ interface IsolatedMessageGroupProps {
   sandboxSetupError?: string
   onRetrySetup?: () => void
   onRollback?: (msg: any) => void
+  onFork?: (messageId: string) => void
   // Components passed from parent - must be stable references
   UserBubbleComponent: React.ComponentType<{
     messageId: string
@@ -75,6 +79,7 @@ function areGroupPropsEqual(
     prev.sandboxSetupError === next.sandboxSetupError &&
     prev.onRetrySetup === next.onRetrySetup &&
     prev.onRollback === next.onRollback &&
+    prev.onFork === next.onFork &&
     prev.UserBubbleComponent === next.UserBubbleComponent &&
     prev.ToolCallComponent === next.ToolCallComponent &&
     prev.MessageGroupWrapper === next.MessageGroupWrapper &&
@@ -92,6 +97,7 @@ export const IsolatedMessageGroup = memo(function IsolatedMessageGroup({
   sandboxSetupError,
   onRetrySetup,
   onRollback,
+  onFork,
   UserBubbleComponent,
   ToolCallComponent,
   MessageGroupWrapper,
@@ -107,6 +113,7 @@ export const IsolatedMessageGroup = memo(function IsolatedMessageGroup({
 
   // Show rollback button only when this user turn has a valid rollback target.
   const canRollback = onRollback && !!rollbackTargetSdkUuid && !isStreaming
+  const canFork = !!onFork
 
   // Extract user message content
   // Note: file-content parts are hidden from UI but sent to agent
@@ -192,10 +199,14 @@ export const IsolatedMessageGroup = memo(function IsolatedMessageGroup({
                   if (imageParts.length > 0) {
                     parts.push(imageParts.length === 1 ? "image" : `${imageParts.length} images`)
                   }
-                  const quoteCount = textMentions.filter(m => m.type === "quote" || m.type === "pasted").length
+                  const quoteCount = textMentions.filter(m => m.type === "quote").length
+                  const pastedCount = textMentions.filter(m => m.type === "pasted").length
                   const codeCount = textMentions.filter(m => m.type === "diff").length
                   if (quoteCount > 0) {
                     parts.push(quoteCount === 1 ? "selected text" : `${quoteCount} text selections`)
+                  }
+                  if (pastedCount > 0) {
+                    parts.push(pastedCount === 1 ? "pasted text" : `${pastedCount} pasted texts`)
                   }
                   if (codeCount > 0) {
                     parts.push(codeCount === 1 ? "code selection" : `${codeCount} code selections`)
@@ -216,25 +227,27 @@ export const IsolatedMessageGroup = memo(function IsolatedMessageGroup({
 
           {/* Rollback button - overlay bottom-right of user bubble */}
           {canRollback && (
-            <div className="absolute bottom-1 right-1 z-20">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => onRollback(userMsg)}
-                    disabled={isRollingBack}
-                    tabIndex={-1}
-                    className={cn(
-                      "p-1 rounded-md transition-all duration-150 ease-out hover:bg-accent/80 active:scale-[0.97] opacity-0 group-hover/user-message:opacity-100",
-                      isRollingBack && "!opacity-50 cursor-not-allowed",
-                    )}
-                  >
-                    <IconTextUndo className="w-3.5 h-3.5 text-muted-foreground" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {isRollingBack ? "Rolling back..." : "Rollback to here"}
-                </TooltipContent>
-              </Tooltip>
+            <div className="absolute bottom-1 right-1 z-20 flex items-center gap-0.5">
+              {canRollback && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => onRollback(userMsg)}
+                      disabled={isRollingBack}
+                      tabIndex={-1}
+                      className={cn(
+                        "p-1 rounded-md transition-all duration-150 ease-out hover:bg-accent/80 active:scale-[0.97] opacity-0 group-hover/user-message:opacity-100",
+                        isRollingBack && "!opacity-50 cursor-not-allowed",
+                      )}
+                    >
+                      <IconTextUndo className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {isRollingBack ? "Rolling back..." : "Rollback to here"}
+                  </TooltipContent>
+                </Tooltip>
+              )}
             </div>
           )}
         </div>
@@ -274,13 +287,15 @@ export const IsolatedMessageGroup = memo(function IsolatedMessageGroup({
 
       {/* Assistant messages - memoized, only re-renders when IDs change */}
       {assistantIds.length > 0 && (
-        <MemoizedAssistantMessages
-          assistantMsgIds={assistantIds}
-          subChatId={subChatId}
-          chatId={chatId}
-          isMobile={isMobile}
-          sandboxSetupStatus={sandboxSetupStatus}
-        />
+        <ForkContext.Provider value={canFork ? onFork : null}>
+          <MemoizedAssistantMessages
+            assistantMsgIds={assistantIds}
+            subChatId={subChatId}
+            chatId={chatId}
+            isMobile={isMobile}
+            sandboxSetupStatus={sandboxSetupStatus}
+          />
+        </ForkContext.Provider>
       )}
 
       {/* Planning indicator */}

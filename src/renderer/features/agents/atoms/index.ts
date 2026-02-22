@@ -218,6 +218,22 @@ export const lastSelectedModelIdAtom = atomWithStorage<string>(
   { getOnInit: true },
 )
 
+export const lastSelectedCodexModelIdAtom = atomWithStorage<string>(
+  "agents:lastSelectedCodexModelId",
+  "gpt-5.3-codex",
+  undefined,
+  { getOnInit: true },
+)
+
+export const lastSelectedCodexThinkingAtom = atomWithStorage<
+  "low" | "medium" | "high" | "xhigh"
+>(
+  "agents:lastSelectedCodexThinking",
+  "high",
+  undefined,
+  { getOnInit: true },
+)
+
 // Storage for all sub-chat modes (persisted per subChatId)
 const subChatModesStorageAtom = atomWithStorage<Record<string, AgentMode>>(
   "agents:subChatModes",
@@ -575,6 +591,7 @@ export const pendingConflictResolutionMessageAtom = atom<string | null>(null)
 // After successful OAuth flow, this triggers automatic retry of the message
 export type PendingAuthRetryMessage = {
   subChatId: string  // Required: only retry in the correct chat
+  provider: "claude-code" | "codex"
   prompt: string
   images?: Array<{
     base64Data: string
@@ -584,6 +601,22 @@ export type PendingAuthRetryMessage = {
   readyToRetry: boolean  // Only retry when this is true (set by modal on OAuth success)
 }
 export const pendingAuthRetryMessageAtom = atom<PendingAuthRetryMessage | null>(null)
+
+// Pending chat history file to inject into a newly created sub-chat
+// Set when user switches provider mid-chat, consumed by ChatInputArea on mount
+export interface PendingChatHistory {
+  subChatId: string
+  file: {
+    id: string
+    filePath: string
+    filename: string
+    size: number
+    preview: string
+    createdAt: Date
+    kind: "chatHistory"
+  }
+}
+export const pendingChatHistoryAtom = atom<PendingChatHistory | null>(null)
 
 // Work mode preference (local = work in project dir, worktree = create isolated worktree)
 export type WorkMode = "local" | "worktree"

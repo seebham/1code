@@ -16,8 +16,8 @@ import {
   IconCloseSidebarRight,
   IconOpenSidebarRight,
   IconSpinner,
-  UnarchiveIcon,
   PauseIcon,
+  UnarchiveIcon,
   VolumeIcon
 } from "../../../components/ui/icons"
 import { Kbd } from "../../../components/ui/kbd"
@@ -33,8 +33,8 @@ import {
 } from "../../../components/ui/tooltip"
 // e2b API routes are used instead of useSandboxManager for agents
 // import { clearSubChatSelectionAtom, isSubChatMultiSelectModeAtom, selectedSubChatIdsAtom } from "@/lib/atoms/agent-subchat-selection"
+import { ResizableBottomPanel } from "@/components/ui/resizable-bottom-panel"
 import { Chat, useChat } from "@ai-sdk/react"
-import type { DiffViewMode } from "../ui/agent-diff-view"
 import { atom, useAtom, useAtomValue, useSetAtom } from "jotai"
 import {
   ArrowDown,
@@ -68,6 +68,7 @@ import {
   defaultAgentModeAtom,
   isDesktopAtom, isFullscreenAtom,
   normalizeCustomClaudeConfig,
+  sessionInfoAtom,
   selectedOllamaModelAtom,
   soundNotificationsEnabledAtom
 } from "../../../lib/atoms"
@@ -81,10 +82,10 @@ import { cn } from "../../../lib/utils"
 import { isDesktopApp } from "../../../lib/utils/platform"
 import { ChangesPanel } from "../../changes"
 import { useCommitActions } from "../../changes/components/commit-input"
-import { usePushAction } from "../../changes/hooks/use-push-action"
 import { DiffCenterPeekDialog } from "../../changes/components/diff-center-peek-dialog"
 import { DiffFullPageView } from "../../changes/components/diff-full-page-view"
 import { DiffSidebarHeader } from "../../changes/components/diff-sidebar-header"
+import { usePushAction } from "../../changes/hooks/use-push-action"
 import { getStatusIndicator } from "../../changes/utils/status"
 import {
   detailsSidebarOpenAtom,
@@ -93,9 +94,9 @@ import {
 import { DetailsSidebar } from "../../details-sidebar/details-sidebar"
 import { FileViewerSidebar } from "../../file-viewer"
 import { FileSearchDialog } from "../../file-viewer/components/file-search-dialog"
-import { terminalSidebarOpenAtomFamily, terminalDisplayModeAtom, terminalBottomHeightAtom } from "../../terminal/atoms"
-import { TerminalSidebar, TerminalBottomPanelContent } from "../../terminal/terminal-sidebar"
-import { ResizableBottomPanel } from "@/components/ui/resizable-bottom-panel"
+import { terminalBottomHeightAtom, terminalDisplayModeAtom, terminalSidebarOpenAtomFamily } from "../../terminal/atoms"
+import { TerminalBottomPanelContent, TerminalSidebar } from "../../terminal/terminal-sidebar"
+import { getTerminalScopeKey } from "../../terminal/utils"
 import {
   agentsChangesPanelCollapsedAtom,
   agentsChangesPanelWidthAtom,
@@ -106,16 +107,17 @@ import {
   agentsSubChatsSidebarModeAtom,
   agentsSubChatUnseenChangesAtom,
   agentsUnseenChangesAtom,
+  clearLoading,
+  compactingSubChatsAtom,
+  currentPlanPathAtomFamily,
+  diffActiveTabAtom,
+  diffSidebarOpenAtomFamily,
+  diffViewDisplayModeAtom,
+  expiredUserQuestionsAtom,
   fileSearchDialogOpenAtom,
   fileViewerDisplayModeAtom,
   fileViewerOpenAtomFamily,
   fileViewerSidebarWidthAtom,
-  clearLoading,
-  compactingSubChatsAtom,
-  currentPlanPathAtomFamily,
-  diffSidebarOpenAtomFamily,
-  diffViewDisplayModeAtom,
-  expiredUserQuestionsAtom,
   filteredDiffFilesAtom,
   filteredSubChatIdAtom,
   isCreatingPrAtom,
@@ -126,6 +128,9 @@ import {
   pendingAuthRetryMessageAtom,
   pendingBuildPlanSubChatIdAtom,
   pendingConflictResolutionMessageAtom,
+  pendingChatHistoryAtom,
+  type PendingChatHistory,
+  pendingMentionAtom,
   pendingPlanApprovalsAtom,
   pendingPrMessageAtom,
   pendingReviewMessageAtom,
@@ -135,15 +140,14 @@ import {
   QUESTIONS_SKIPPED_MESSAGE,
   selectedAgentChatIdAtom,
   selectedCommitAtom,
-  diffActiveTabAtom,
   selectedDiffFilePathAtom,
   setLoading,
   subChatFilesAtom,
+  agentsSidebarOpenAtom,
   subChatModeAtomFamily,
+  suppressInputFocusAtom,
   undoStackAtom,
   workspaceDiffCacheAtomFamily,
-  pendingMentionAtom,
-  suppressInputFocusAtom,
   type AgentMode,
   type SelectedCommit
 } from "../atoms"
@@ -162,18 +166,18 @@ import { useHaptic } from "../hooks/use-haptic"
 import { usePastedTextFiles, type PastedTextFile } from "../hooks/use-pasted-text-files"
 import { useTextContextSelection } from "../hooks/use-text-context-selection"
 import { useToggleFocusOnCmdEsc } from "../hooks/use-toggle-focus-on-cmd-esc"
-import { type SelectedTextContext, type DiffTextContext, createTextPreview } from "../lib/queue-utils"
+import { ACPChatTransport } from "../lib/acp-chat-transport"
+import { formatHistoryForContext } from "../lib/export-chat"
 import {
   clearSubChatDraft,
   getSubChatDraftFull
 } from "../lib/drafts"
 import { IPCChatTransport } from "../lib/ipc-chat-transport"
 import {
-  createQueueItem,
-  generateQueueId,
+  createQueueItem, createTextPreview, generateQueueId,
   toQueuedFile,
   toQueuedImage,
-  toQueuedTextContext,
+  toQueuedTextContext, toQueuedDiffTextContext, toQueuedPastedText, type DiffTextContext, type SelectedTextContext
 } from "../lib/queue-utils"
 import { RemoteChatTransport } from "../lib/remote-chat-transport"
 import {
@@ -199,6 +203,7 @@ import {
   useAgentSubChatStore,
   type SubChatMeta,
 } from "../stores/sub-chat-store"
+import type { DiffViewMode } from "../ui/agent-diff-view"
 import {
   AgentDiffView,
   diffViewModeAtom,
@@ -233,19 +238,14 @@ const selectedTeamIdAtom = atom<string | null>(null)
 // import type { PlanType } from "@/lib/config/subscription-plans"
 type PlanType = string
 
-// UTF-8 safe base64 encoding (btoa doesn't support Unicode)
-function utf8ToBase64(str: string): string {
-  const bytes = new TextEncoder().encode(str)
-  const binString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join("")
-  return btoa(binString)
-}
+// Module-level scroll position cache (per subChatId, session-only)
+// Stores { scrollTop, scrollHeight, wasAtBottom } so we can restore position on tab switch
+const scrollPositionCache = new Map<
+  string,
+  { scrollTop: number; scrollHeight: number; wasAtBottom: boolean }
+>()
 
-// UTF-8 safe base64 decoding (atob doesn't support Unicode)
-function base64ToUtf8(base64: string): string {
-  const binString = atob(base64)
-  const bytes = Uint8Array.from(binString, (char) => char.codePointAt(0)!)
-  return new TextDecoder().decode(bytes)
-}
+import { utf8ToBase64, base64ToUtf8 } from "../utils/base64"
 
 /** Wait for streaming to finish by subscribing to the status store.
  *  Includes a 30s safety timeout — if the store never transitions to "ready",
@@ -360,7 +360,7 @@ const CodexIcon = (props: React.SVGProps<SVGSVGElement>) => (
 // Model options for Claude Code
 const claudeModels = [
   { id: "opus", name: "Opus 4.6" },
-  { id: "sonnet", name: "Sonnet 4.5" },
+  { id: "sonnet", name: "Sonnet 4.6" },
   { id: "haiku", name: "Haiku 4.5" },
 ]
 
@@ -920,9 +920,12 @@ function MessageGroup({ children, isLastGroup }: MessageGroupProps) {
       style={{
         // content-visibility: auto - браузер пропускает layout/paint для элементов вне viewport
         // Это ОГРОМНАЯ оптимизация для длинных чатов - рендерится только видимое
-        contentVisibility: "auto",
-        // Примерная высота для правильного скроллбара до рендеринга
-        containIntrinsicSize: "auto 200px",
+        // НЕ применяем к последней группе: она всегда видна и активно стримится,
+        // content-visibility на ней мешает корректному scrollHeight во время стриминга
+        ...(!isLastGroup && {
+          contentVisibility: "auto",
+          containIntrinsicSize: "auto 200px",
+        }),
         // Последняя группа имеет минимальную высоту контейнера чата (минус отступ)
         ...(isLastGroup && { minHeight: "calc(var(--chat-container-height) - 32px)" }),
       }}
@@ -1896,9 +1899,11 @@ const ChatViewInner = memo(function ChatViewInner({
   chat,
   subChatId,
   parentChatId,
+  provider = "claude-code",
   isFirstSubChat,
   onAutoRename,
   onCreateNewSubChat,
+  onProviderChange,
   refreshDiff,
   teamId,
   repository,
@@ -1914,13 +1919,21 @@ const ChatViewInner = memo(function ChatViewInner({
   onRestoreWorkspace,
   existingPrUrl,
   isActive = true,
+  workspaceName,
+  workspaceBranch,
+  workspaceRepoName,
 }: {
   chat: Chat<any>
   subChatId: string
   parentChatId: string
+  provider?: "claude-code" | "codex"
   isFirstSubChat: boolean
   onAutoRename: (userMessage: string, subChatId: string) => void
   onCreateNewSubChat?: () => void
+  onProviderChange?: (
+    subChatId: string,
+    provider: "claude-code" | "codex",
+  ) => void
   refreshDiff?: () => void
   teamId?: string
   repository?: string
@@ -1936,6 +1949,9 @@ const ChatViewInner = memo(function ChatViewInner({
   onRestoreWorkspace?: () => void
   existingPrUrl?: string | null
   isActive?: boolean
+  workspaceName?: string | null
+  workspaceBranch?: string | null
+  workspaceRepoName?: string | null
 }) {
   const hasTriggeredRenameRef = useRef(false)
   const hasTriggeredAutoGenerateRef = useRef(false)
@@ -1959,8 +1975,44 @@ const ChatViewInner = memo(function ChatViewInner({
     }
   }, [])
 
+  // Save scroll position when tab becomes inactive or on unmount
+  useEffect(() => {
+    if (!isActive) {
+      // Tab just became inactive — save current scroll position
+      const container = chatContainerRef.current
+      if (container) {
+        const threshold = 50
+        const wasAtBottom =
+          container.scrollHeight - container.scrollTop - container.clientHeight <= threshold
+        scrollPositionCache.set(subChatId, {
+          scrollTop: container.scrollTop,
+          scrollHeight: container.scrollHeight,
+          wasAtBottom,
+        })
+      }
+    }
+    // On unmount, save scroll position for this sub-chat
+    return () => {
+      const container = chatContainerRef.current
+      if (container) {
+        const threshold = 50
+        const wasAtBottom =
+          container.scrollHeight - container.scrollTop - container.clientHeight <= threshold
+        scrollPositionCache.set(subChatId, {
+          scrollTop: container.scrollTop,
+          scrollHeight: container.scrollHeight,
+          wasAtBottom,
+        })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, subChatId])
+
   // Track chat container height via CSS custom property (no re-renders)
   const chatContainerObserverRef = useRef<ResizeObserver | null>(null)
+
+  // Ref for the inner content wrapper (for ResizeObserver-based scroll-to-bottom)
+  const contentWrapperRef = useRef<HTMLDivElement | null>(null)
 
   const editorRef = useRef<AgentsMentionsEditorHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -2250,11 +2302,21 @@ const ChatViewInner = memo(function ChatViewInner({
   const {
     pastedTexts,
     addPastedText,
+    addChatHistoryFile,
     removePastedText,
     clearPastedTexts,
     pastedTextsRef,
     setPastedTextsFromDraft,
   } = usePastedTextFiles(subChatId)
+
+  // Consume pending chat history file when this sub-chat is the target
+  useEffect(() => {
+    const pending = appStore.get(pendingChatHistoryAtom)
+    if (pending && pending.subChatId === subChatId) {
+      addChatHistoryFile(pending.file)
+      appStore.set(pendingChatHistoryAtom, null)
+    }
+  }, [subChatId, addChatHistoryFile])
 
   // File contents cache - stores content for file mentions (keyed by mentionId)
   // This content gets added to the prompt when sending, without showing a separate card
@@ -2435,6 +2497,31 @@ const ChatViewInner = memo(function ChatViewInner({
     return () => window.removeEventListener("file-viewer-add-to-context", handler)
   }, [addTextContext])
 
+  // Listen for file-tree "Add to Chat Context" — inserts file mention chip
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as {
+        id: string
+        label: string
+        path: string
+        repository: string
+        type: string
+      }
+      if (detail.id && detail.label) {
+        editorRef.current?.insertMention({
+          id: detail.id,
+          label: detail.label,
+          path: detail.path,
+          repository: detail.repository,
+          type: detail.type as "file" | "folder",
+        })
+        editorRef.current?.focus()
+      }
+    }
+    window.addEventListener("file-tree-mention", handler)
+    return () => window.removeEventListener("file-tree-mention", handler)
+  }, [])
+
   // Handler for quick comment trigger from popover
   const handleQuickComment = useCallback((text: string, source: TextSelectionSource, rect: DOMRect) => {
     setQuickCommentState({ selectedText: text, source, rect })
@@ -2592,38 +2679,35 @@ const ChatViewInner = memo(function ChatViewInner({
     [messages],
   )
 
-  // Pre-compute token data for ChatInputArea to avoid passing unstable messages array
-  // This prevents ChatInputArea from re-rendering on every streaming chunk
-  // NOTE: Tokens are counted since the last completed compact boundary.
+  // Pre-compute token data for ChatInputArea to avoid passing unstable messages array.
+  // Context usage follows Claude SDK semantics: use the latest assistant turn's
+  // context size (input + cache), not cumulative sums across historical turns.
   const messageTokenData = useMemo(() => {
-    let startIndex = 0
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i]
-      const parts = (msg as any)?.parts as Array<{ type?: string; state?: string }> | undefined
-      if (
-        parts?.some(
-          (part) =>
-            part.type === "tool-Compact" &&
-            (part.state === "output-available" || part.state === "result"),
-        )
-      ) {
-        // Include the compact result itself in the token window
-        startIndex = i
-      }
-    }
+    const lastAssistantWithMetadata = [...messages]
+      .reverse()
+      .find((msg) => msg.role === "assistant" && !!msg.metadata)
 
-    let totalInputTokens = 0
-    let totalOutputTokens = 0
-    let totalCostUsd = 0
-    for (let i = startIndex; i < messages.length; i++) {
-      const msg = messages[i]
-      if (msg.metadata) {
-        totalInputTokens += msg.metadata.inputTokens || 0
-        totalOutputTokens += msg.metadata.outputTokens || 0
-        totalCostUsd += msg.metadata.totalCostUsd || 0
-      }
-    }
-    const messageCount = Math.max(0, messages.length - startIndex)
+    const metadata = lastAssistantWithMetadata?.metadata as
+      | {
+          inputTokens?: number
+          outputTokens?: number
+          totalCostUsd?: number
+          cacheReadInputTokens?: number
+          cacheCreationInputTokens?: number
+        }
+      | undefined
+
+    const cacheReadInputTokens = metadata?.cacheReadInputTokens || 0
+    const cacheCreationInputTokens = metadata?.cacheCreationInputTokens || 0
+
+    const totalInputTokens =
+      (metadata?.inputTokens || 0) + cacheReadInputTokens + cacheCreationInputTokens
+    const totalOutputTokens = metadata?.outputTokens || 0
+    const totalCostUsd = metadata?.totalCostUsd || 0
+
+    // Keep this tied to rendered messages for memo comparator stability.
+    const messageCount = messages.length
+
     return {
       totalInputTokens,
       totalOutputTokens,
@@ -2931,6 +3015,7 @@ const ChatViewInner = memo(function ChatViewInner({
       pendingAuthRetry &&
       pendingAuthRetry.readyToRetry &&
       pendingAuthRetry.subChatId === subChatId &&
+      pendingAuthRetry.provider === provider &&
       !isStreaming
     ) {
       // Clear the pending message immediately to prevent double-sending
@@ -2963,6 +3048,7 @@ const ChatViewInner = memo(function ChatViewInner({
     }
   }, [
     pendingAuthRetry,
+    provider,
     isStreaming,
     sendMessage,
     setPendingAuthRetry,
@@ -3311,6 +3397,51 @@ const ChatViewInner = memo(function ChatViewInner({
     ],
   )
 
+  // Fork handler - creates a new sub-chat with messages up to this point
+  // Preserves SDK session context by copying .jsonl session files
+  const isForkingRef = useRef(false)
+  const handleForkFromMessage = useCallback(
+    async (messageId: string) => {
+      if (isStreaming || isForkingRef.current) return
+      isForkingRef.current = true
+
+      try {
+        const result = await trpcClient.chats.forkSubChat.mutate({
+          subChatId,
+          messageId,
+        })
+
+        const newSubChat = result.subChat
+        const newMode = (newSubChat.mode as "plan" | "agent") || "agent"
+
+        // Invalidate + await ensures agentSubChats has the fork before we switch tabs
+        await utils.agents.getAgentChat.invalidate({ chatId: parentChatId })
+
+        // Update Zustand sub-chat store
+        const store = useAgentSubChatStore.getState()
+        store.addToAllSubChats({
+          id: newSubChat.id,
+          name: newSubChat.name || "Fork",
+          created_at: newSubChat.created_at || new Date().toISOString(),
+          mode: newMode,
+        })
+
+        // Set mode atom for the new sub-chat
+        appStore.set(subChatModeAtomFamily(newSubChat.id), newMode)
+
+        // Open the forked sub-chat tab and switch to it
+        store.addToOpenSubChats(newSubChat.id)
+        store.setActiveSubChat(newSubChat.id)
+      } catch (error) {
+        console.error("[handleForkFromMessage] Error:", error)
+        toast.error("Failed to fork conversation")
+      } finally {
+        isForkingRef.current = false
+      }
+    },
+    [isStreaming, subChatId, parentChatId, utils],
+  )
+
   // Sync local isRollingBack state to global atom (prevents multiple rollbacks across chats)
   const setIsRollingBackAtom = useSetAtom(isRollingBackAtom)
   useEffect(() => {
@@ -3440,12 +3571,10 @@ const ChatViewInner = memo(function ChatViewInner({
   // Ref to track if initial scroll has been set for this sub-chat
   const scrollInitializedRef = useRef(false)
 
-  // Track if this tab has been initialized (for keep-alive)
-  const hasInitializedRef = useRef(false)
-
-  // Initialize scroll position on mount (only once per tab with keep-alive)
-  // Strategy: wait for content to stabilize, then scroll to bottom ONCE
-  // No jumping around - just wait and scroll when ready
+  // Initialize scroll position on mount or tab re-activation.
+  // Strategy: restore saved position if user was scrolled up, otherwise scroll to bottom.
+  // Uses ResizeObserver on content wrapper to catch ALL height changes (markdown rendering,
+  // syntax highlighting, image loading, content-visibility reflows) — not just childList mutations.
   useLayoutEffect(() => {
     // Skip if not active (keep-alive: hidden tabs don't need scroll init)
     if (!isActive) return
@@ -3453,34 +3582,46 @@ const ChatViewInner = memo(function ChatViewInner({
     const container = chatContainerRef.current
     if (!container) return
 
-    // With keep-alive, only initialize once per tab mount
-    if (hasInitializedRef.current) return
-    hasInitializedRef.current = true
-
-    // Reset on sub-chat change
     scrollInitializedRef.current = false
     isInitializingScrollRef.current = true
 
-    // IMMEDIATE scroll to bottom - no waiting
-    container.scrollTop = container.scrollHeight
-    shouldAutoScrollRef.current = true
+    // Check for saved scroll position from tab switch
+    const savedPosition = scrollPositionCache.get(subChatId)
+
+    if (savedPosition && !savedPosition.wasAtBottom) {
+      // User was scrolled up — restore their position relative to content bottom.
+      // Content may have changed height since we saved, so we offset from the bottom:
+      const savedOffset = savedPosition.scrollHeight - savedPosition.scrollTop
+      container.scrollTop = Math.max(0, container.scrollHeight - savedOffset)
+      shouldAutoScrollRef.current = false
+    } else {
+      // No saved position or user was at bottom — scroll to bottom
+      container.scrollTop = container.scrollHeight
+      shouldAutoScrollRef.current = true
+    }
 
     // Mark as initialized IMMEDIATELY
     scrollInitializedRef.current = true
     isInitializingScrollRef.current = false
 
-    // MutationObserver for async content (images, code blocks loading after initial render)
-    const observer = new MutationObserver((mutations) => {
+    // ResizeObserver on content wrapper to detect any height change
+    // (markdown rendering, syntax highlighting, image loads, content-visibility reflows, etc.)
+    // This is more reliable than MutationObserver which only catches childList changes.
+    const contentWrapper = contentWrapperRef.current
+    let lastContentHeight = contentWrapper?.getBoundingClientRect().height ?? 0
+    // Track the previous scrollHeight so we can adjust restored positions proportionally
+    let prevScrollHeight = container.scrollHeight
+
+    const resizeObserver = new ResizeObserver(() => {
       // Skip if not active (keep-alive: don't scroll hidden tabs)
-      if (!isActive) return
-      if (!shouldAutoScrollRef.current) return
+      if (!isActiveRef.current) return
 
-      // Check if content was added
-      const hasAddedContent = mutations.some(
-        (m) => m.type === "childList" && m.addedNodes.length > 0
-      )
+      const newContentHeight = contentWrapper?.getBoundingClientRect().height ?? 0
+      if (newContentHeight === lastContentHeight) return
+      lastContentHeight = newContentHeight
 
-      if (hasAddedContent) {
+      if (shouldAutoScrollRef.current) {
+        // Auto-scroll to bottom as content grows
         requestAnimationFrame(() => {
           isAutoScrollingRef.current = true
           container.scrollTop = container.scrollHeight
@@ -3488,13 +3629,24 @@ const ChatViewInner = memo(function ChatViewInner({
             isAutoScrollingRef.current = false
           })
         })
+      } else {
+        // User is scrolled up — maintain their relative position as content height changes
+        // (e.g., syntax highlighting expanding code blocks above the viewport)
+        const newScrollHeight = container.scrollHeight
+        if (newScrollHeight !== prevScrollHeight && prevScrollHeight > 0) {
+          const delta = newScrollHeight - prevScrollHeight
+          container.scrollTop = container.scrollTop + delta
+        }
       }
+      prevScrollHeight = container.scrollHeight
     })
 
-    observer.observe(container, { childList: true, subtree: true })
+    if (contentWrapper) {
+      resizeObserver.observe(contentWrapper)
+    }
 
     return () => {
-      observer.disconnect()
+      resizeObserver.disconnect()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subChatId, isActive])
@@ -3601,13 +3753,15 @@ const ChatViewInner = memo(function ChatViewInner({
     const currentImages = imagesRef.current
     const currentFiles = filesRef.current
     const currentTextContexts = textContextsRef.current
+    const currentDiffTextContexts = diffTextContextsRef.current
     const currentPastedTexts = pastedTextsRef.current
     const hasImages =
       currentImages.filter((img) => !img.isLoading && img.url).length > 0
     const hasTextContexts = currentTextContexts.length > 0
+    const hasDiffTextContexts = currentDiffTextContexts.length > 0
     const hasPastedTexts = currentPastedTexts.length > 0
 
-    if (!hasText && !hasImages && !hasTextContexts && !hasPastedTexts) return
+    if (!hasText && !hasImages && !hasTextContexts && !hasDiffTextContexts && !hasPastedTexts) return
 
     // If streaming, add to queue instead of sending directly
     if (isStreamingRef.current) {
@@ -3618,13 +3772,17 @@ const ChatViewInner = memo(function ChatViewInner({
         .filter((f) => !f.isLoading && f.url)
         .map(toQueuedFile)
       const queuedTextContexts = currentTextContexts.map(toQueuedTextContext)
+      const queuedDiffTextContexts = currentDiffTextContexts.map(toQueuedDiffTextContext)
+      const queuedPastedTexts = currentPastedTexts.map(toQueuedPastedText)
 
       const item = createQueueItem(
         generateQueueId(),
         inputValue.trim(),
         queuedImages.length > 0 ? queuedImages : undefined,
         queuedFiles.length > 0 ? queuedFiles : undefined,
-        queuedTextContexts.length > 0 ? queuedTextContexts : undefined
+        queuedTextContexts.length > 0 ? queuedTextContexts : undefined,
+        queuedDiffTextContexts.length > 0 ? queuedDiffTextContexts : undefined,
+        queuedPastedTexts.length > 0 ? queuedPastedTexts : undefined,
       )
       addToQueue(subChatId, item)
 
@@ -3635,6 +3793,8 @@ const ChatViewInner = memo(function ChatViewInner({
       }
       clearAll()
       clearTextContexts()
+      clearDiffTextContexts()
+      clearPastedTexts()
       return
     }
 
@@ -3721,7 +3881,6 @@ const ChatViewInner = memo(function ChatViewInner({
     ]
 
     // Add text contexts as mention tokens
-    const currentDiffTextContexts = diffTextContextsRef.current
     let mentionPrefix = ""
 
     if (currentTextContexts.length > 0 || currentDiffTextContexts.length > 0 || currentPastedTexts.length > 0) {
@@ -3738,12 +3897,12 @@ const ChatViewInner = memo(function ChatViewInner({
         return `@[${MENTION_PREFIXES.DIFF}${dtc.filePath}:${lineNum}:${preview}:${encodedText}]`
       })
 
-      // Add pasted text as pasted mentions (format: pasted:size:preview|filepath)
+      // Add pasted text / chat history as mentions (format: prefix:size:preview|filepath)
       // Using | as separator since filepath can contain colons
       const pastedTextMentions = currentPastedTexts.map((pt) => {
-        // Sanitize preview to remove special characters that break mention parsing
         const sanitizedPreview = pt.preview.replace(/[:\[\]|]/g, "")
-        return `@[${MENTION_PREFIXES.PASTED}${pt.size}:${sanitizedPreview}|${pt.filePath}]`
+        const prefix = pt.kind === "chatHistory" ? MENTION_PREFIXES.CHAT_HISTORY : MENTION_PREFIXES.PASTED
+        return `@[${prefix}${pt.size}:${sanitizedPreview}|${pt.filePath}]`
       })
 
       mentionPrefix = [...quoteMentions, ...diffMentions, ...pastedTextMentions].join(" ") + " "
@@ -3894,6 +4053,16 @@ const ChatViewInner = memo(function ChatViewInner({
           return `@[${MENTION_PREFIXES.DIFF}${dtc.filePath}:${lineNum}:${preview}:${encodedText}]`
         })
         mentionPrefix += diffMentions.join(" ") + " "
+      }
+
+      // Add pasted text / chat history as mentions
+      if (item.pastedTexts && item.pastedTexts.length > 0) {
+        const pastedMentions = item.pastedTexts.map((pt) => {
+          const sanitizedPreview = pt.preview.replace(/[:\[\]|]/g, "")
+          const prefix = pt.kind === "chatHistory" ? MENTION_PREFIXES.CHAT_HISTORY : MENTION_PREFIXES.PASTED
+          return `@[${prefix}${pt.size}:${sanitizedPreview}|${pt.filePath}]`
+        })
+        mentionPrefix += pastedMentions.join(" ") + " "
       }
 
       if (item.message || mentionPrefix) {
@@ -4288,6 +4457,77 @@ const ChatViewInner = memo(function ChatViewInner({
     isStreaming || isCompacting || changedFilesForSubChat.length > 0
   const shouldShowStackedCards =
     !displayQuestions && (queue.length > 0 || shouldShowStatusCard)
+  const handleInputProviderChange = useCallback(
+    (nextProvider: "claude-code" | "codex") => {
+      onProviderChange?.(subChatId, nextProvider)
+    },
+    [onProviderChange, subChatId],
+  )
+
+  // Continue conversation with a different provider - creates new sub-chat with history attachment
+  const isContinuingRef = useRef(false)
+  const handleContinueWithProvider = useCallback(
+    async (targetProvider: "claude-code" | "codex") => {
+      if (isStreaming || isContinuingRef.current) return
+      if (!messages || messages.length === 0) return
+      isContinuingRef.current = true
+
+      try {
+        // 1. Format current messages as markdown
+        const historyMarkdown = formatHistoryForContext(messages as any)
+
+        // 2. Save to disk via writePastedText endpoint
+        const result = await trpcClient.files.writePastedText.mutate({
+          subChatId,
+          text: historyMarkdown,
+        })
+
+        // 3. Create new sub-chat
+        const newSubChat = await trpcClient.chats.createSubChat.mutate({
+          chatId: parentChatId,
+          name: "New Chat",
+          mode: subChatMode,
+        })
+
+        const newId = newSubChat.id
+
+        // 4. Store pending chat history for the new sub-chat to consume on mount
+        const historyFile: PendingChatHistory["file"] = {
+          id: `chatHistory_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+          filePath: result.filePath,
+          filename: result.filename,
+          size: result.size,
+          preview: subChatNameRef.current?.trim() || "Previous Chat",
+          createdAt: new Date(),
+          kind: "chatHistory",
+        }
+        appStore.set(pendingChatHistoryAtom, { subChatId: newId, file: historyFile })
+
+        // 5. Update Zustand store and switch to new tab
+        const store = useAgentSubChatStore.getState()
+        store.addToAllSubChats({
+          id: newId,
+          name: "New Chat",
+          created_at: new Date().toISOString(),
+          mode: subChatMode,
+        })
+        appStore.set(subChatModeAtomFamily(newId), subChatMode)
+        store.addToOpenSubChats(newId)
+        store.setActiveSubChat(newId)
+
+        // 6. Set provider override AFTER tab switch so the outer component picks it up
+        // We call onProviderChange which sets subChatProviderOverrides in the outer scope
+        // The new sub-chat has 0 messages so the guard in handleProviderChange will pass
+        onProviderChange?.(newId, targetProvider)
+      } catch (error) {
+        console.error("[handleContinueWithProvider] Error:", error)
+        toast.error("Failed to continue with provider")
+      } finally {
+        isContinuingRef.current = false
+      }
+    },
+    [isStreaming, messages, subChatId, parentChatId, subChatMode, onProviderChange],
+  )
 
   return (
     <SearchHighlightProvider>
@@ -4329,8 +4569,16 @@ const ChatViewInner = memo(function ChatViewInner({
             onSave={handleRenameSubChat}
             isMobile={false}
             chatId={subChatId}
-            hasMessages={messages.length > 0}
+            hasMessages={true} /* Always show "New Chat" placeholder when name is empty */
           />
+          {/* Workspace subtitle: repo • branch */}
+          {(workspaceRepoName || workspaceBranch) && (
+            <div className="max-w-2xl mx-auto px-4">
+              <span className="text-xs text-muted-foreground/50 truncate block">
+                {[workspaceRepoName, workspaceBranch].filter(Boolean).join(" • ")}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -4369,6 +4617,7 @@ const ChatViewInner = memo(function ChatViewInner({
         data-chat-container
       >
         <div
+          ref={contentWrapperRef}
           className="px-2 max-w-2xl mx-auto -mb-4 space-y-4"
           style={{
             paddingBottom: "32px",
@@ -4392,6 +4641,7 @@ const ChatViewInner = memo(function ChatViewInner({
               MessageGroupWrapper={MessageGroup}
               toolRegistry={AgentToolRegistry}
               onRollback={handleRollback}
+              onFork={handleForkFromMessage}
             />
           </div>
         </div>
@@ -4472,6 +4722,7 @@ const ChatViewInner = memo(function ChatViewInner({
         messageTokenData={messageTokenData}
         subChatId={subChatId}
         parentChatId={parentChatId}
+        provider={provider}
         teamId={teamId}
         repository={repository}
         sandboxId={sandboxId}
@@ -4483,6 +4734,9 @@ const ChatViewInner = memo(function ChatViewInner({
         firstQueueItemId={queue[0]?.id}
         onInputContentChange={setInputHasContent}
         onSubmitWithQuestionAnswer={submitWithQuestionAnswerCallback}
+        onProviderChange={handleInputProviderChange}
+        onContinueWithProvider={handleContinueWithProvider}
+        isActive={isActive}
       />
 
         {/* Scroll to bottom button - isolated component to avoid re-renders during streaming */}
@@ -4542,6 +4796,7 @@ export function ChatView({
 
   const isDesktop = useAtomValue(isDesktopAtom)
   const isFullscreen = useAtomValue(isFullscreenAtom)
+  const sidebarOpen = useAtomValue(agentsSidebarOpenAtom)
   const customClaudeConfig = useAtomValue(customClaudeConfigAtom)
   const selectedOllamaModel = useAtomValue(selectedOllamaModelAtom)
   const normalizedCustomClaudeConfig =
@@ -4874,14 +5129,16 @@ export function ChatView({
   }, [isDiffSidebarOpen, diffDisplayMode, isDetailsSidebarOpen, setDiffDisplayMode, setIsDetailsSidebarOpen, setIsDiffSidebarOpen])
 
   // Hide/show traffic lights based on full-page diff or full-page file viewer
+  // When exiting full-page mode, restore based on sidebar state (not unconditionally true)
   useEffect(() => {
     if (!isDesktop || isFullscreen) return
     if (typeof window === "undefined" || !window.desktopApi?.setTrafficLightVisibility) return
 
     const isFullPageDiff = isDiffSidebarOpen && diffDisplayMode === "full-page"
     const isFullPageFileViewer = !!fileViewerPath && fileViewerDisplayMode === "full-page"
-    window.desktopApi.setTrafficLightVisibility(!isFullPageDiff && !isFullPageFileViewer)
-  }, [isDiffSidebarOpen, diffDisplayMode, fileViewerPath, fileViewerDisplayMode, isDesktop, isFullscreen])
+    const shouldHide = isFullPageDiff || isFullPageFileViewer
+    window.desktopApi.setTrafficLightVisibility(shouldHide ? false : sidebarOpen)
+  }, [isDiffSidebarOpen, diffDisplayMode, fileViewerPath, fileViewerDisplayMode, isDesktop, isFullscreen, sidebarOpen])
 
   // Track diff sidebar width for responsive header
   const storedDiffSidebarWidth = useAtomValue(agentsDiffSidebarWidthAtom)
@@ -4968,6 +5225,14 @@ export function ChatView({
       allSubChats: state.allSubChats,
     }))
   )
+  const [
+    subChatProviderOverrides,
+    setSubChatProviderOverrides,
+  ] = useState<Record<string, "claude-code" | "codex">>({})
+
+  useEffect(() => {
+    setSubChatProviderOverrides({})
+  }, [chatId])
 
   // Clear sub-chat "unseen changes" indicator when sub-chat becomes active
   useEffect(() => {
@@ -4997,6 +5262,7 @@ export function ChatView({
   const [isReviewing, setIsReviewing] = useState(false)
   // Subchat filter setter - used by handleReview to filter by active subchat
   const setFilteredSubChatId = useSetAtom(filteredSubChatIdAtom)
+  const setSessionInfo = useSetAtom(sessionInfoAtom)
 
   // Determine if we're in sandbox mode
   const chatSourceMode = useAtomValue(chatSourceModeAtom)
@@ -5260,6 +5526,15 @@ export function ChatView({
   const worktreePath = agentChat?.worktreePath as string | null
   // Desktop: original project path for MCP config lookup
   const originalProjectPath = (agentChat as any)?.project?.path as string | undefined
+
+  // Terminal scope key: shared by project path (local mode) or isolated per workspace (worktree)
+  const terminalScopeKey = useMemo(() => {
+    return getTerminalScopeKey({
+      branch: (agentChat as any)?.branch ?? null,
+      worktreePath: worktreePath,
+      id: chatId,
+    })
+  }, [(agentChat as any)?.branch, worktreePath, chatId])
   // Fallback for web: use sandbox_id
   const sandboxId = agentChat?.sandbox_id
   const sandboxUrl = sandboxId ? `https://3003-${sandboxId}.e2b.app` : null
@@ -5971,6 +6246,146 @@ Make sure to preserve all functionality from both branches when resolving confli
     setCurrentPlanPath(lastPlanPath)
   }, [agentSubChats, activeSubChatIdForPlan, setCurrentPlanPath])
 
+  const inferProviderFromMessages = useCallback(
+    (subChatId?: string): "claude-code" | "codex" => {
+      if (!subChatId) return "claude-code"
+
+      const override = subChatProviderOverrides[subChatId]
+      if (override) return override
+
+      const subChat = ((agentChat as any)?.subChats || []).find(
+        (sc: any) => sc?.id === subChatId,
+      ) as { messages?: any } | undefined
+      const rawMessages = subChat?.messages
+
+      let messages: any[] = []
+      if (Array.isArray(rawMessages)) {
+        messages = rawMessages
+      } else if (typeof rawMessages === "string") {
+        try {
+          const parsed = JSON.parse(rawMessages)
+          messages = Array.isArray(parsed) ? parsed : []
+        } catch {
+          messages = []
+        }
+      }
+
+      for (const message of messages) {
+        const model = (message as any)?.metadata?.model
+        if (typeof model !== "string") continue
+        const normalizedModel = model.toLowerCase()
+        if (
+          normalizedModel.includes("codex") ||
+          normalizedModel.startsWith("gpt-")
+        ) {
+          return "codex"
+        }
+      }
+
+      return "claude-code"
+    },
+    [agentChat, subChatProviderOverrides],
+  )
+
+  const activeSubChatProvider = useMemo(
+    () => inferProviderFromMessages(activeSubChatId || undefined),
+    [activeSubChatId, inferProviderFromMessages],
+  )
+
+  const { data: codexMcpConfig } = trpc.codex.getAllMcpConfig.useQuery(undefined, {
+    enabled: activeSubChatProvider === "codex",
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const codexMcpSessionData = useMemo(() => {
+    if (activeSubChatProvider !== "codex") return null
+    if (!codexMcpConfig) return null
+
+    const groups = codexMcpConfig?.groups || []
+    if (groups.length === 0) {
+      return {
+        mcpServers: [],
+        mcpTools: [],
+      }
+    }
+
+    const orderedGroups = [
+      ...groups.filter((group) => group.projectPath === null),
+      ...groups.filter(
+        (group) =>
+          group.projectPath !== null &&
+          !!originalProjectPath &&
+          group.projectPath === originalProjectPath,
+      ),
+    ]
+
+    const effectiveServers = new Map<string, (typeof groups)[number]["mcpServers"][number]>()
+    for (const group of orderedGroups) {
+      for (const server of group.mcpServers || []) {
+        if (typeof server?.name !== "string" || server.name.length === 0) continue
+        effectiveServers.set(server.name, server)
+      }
+    }
+
+    const mcpServers: Array<{
+      name: string
+      status: "connected" | "failed" | "pending" | "needs-auth"
+      serverInfo?: { name: string; version: string; icons?: Array<{ src: string }> }
+      error?: string
+    }> = []
+    const mcpToolIds = new Set<string>()
+
+    for (const server of effectiveServers.values()) {
+      const status =
+        server.status === "connected" ||
+        server.status === "failed" ||
+        server.status === "pending" ||
+        server.status === "needs-auth"
+          ? server.status
+          : "failed"
+
+      mcpServers.push({
+        name: server.name,
+        status,
+        ...(server.serverInfo ? { serverInfo: server.serverInfo } : {}),
+        ...(server.error ? { error: server.error } : {}),
+      })
+
+      for (const tool of Array.isArray(server.tools) ? server.tools : []) {
+        const toolName =
+          typeof tool === "string"
+            ? tool
+            : typeof tool?.name === "string"
+              ? tool.name
+              : null
+        if (!toolName) continue
+        mcpToolIds.add(`mcp__${server.name}__${toolName}`)
+      }
+    }
+
+    return {
+      mcpServers,
+      mcpTools: [...mcpToolIds].sort((a, b) => a.localeCompare(b)),
+    }
+  }, [activeSubChatProvider, codexMcpConfig?.groups, originalProjectPath])
+
+  useEffect(() => {
+    if (activeSubChatProvider !== "codex" || !codexMcpSessionData) return
+
+    setSessionInfo((prev) => {
+      const nonMcpTools = (prev?.tools || []).filter(
+        (tool) => !tool.startsWith("mcp__"),
+      )
+
+      return {
+        tools: [...nonMcpTools, ...codexMcpSessionData.mcpTools],
+        mcpServers: codexMcpSessionData.mcpServers,
+        plugins: prev?.plugins || [],
+        skills: prev?.skills || [],
+      }
+    })
+  }, [activeSubChatProvider, codexMcpSessionData, setSessionInfo])
+
   // Create or get Chat instance for a sub-chat
   const getOrCreateChat = useCallback(
     (subChatId: string): Chat<any> | null => {
@@ -5978,22 +6393,6 @@ Make sure to preserve all functionality from both branches when resolving confli
       if (!chatWorkingDir || !agentChat) {
         return null
       }
-
-      // Return existing chat if we have it
-      const existing = agentChatStore.get(subChatId)
-      if (existing) {
-        return existing
-      }
-
-      // Find sub-chat data
-      const subChat = agentSubChats.find((sc) => sc.id === subChatId)
-      const messages = (subChat?.messages as any[]) || []
-
-      // Get mode from store metadata (falls back to currentMode)
-      const subChatMeta = useAgentSubChatStore
-        .getState()
-        .allSubChats.find((sc) => sc.id === subChatId)
-      const subChatMode = subChatMeta?.mode || currentMode
 
       // Create transport based on chat type (local worktree vs remote sandbox)
       // Note: Extended thinking setting is read dynamically inside the transport
@@ -6003,6 +6402,64 @@ Make sure to preserve all functionality from both branches when resolving confli
       const chatSandboxUrl = chatSandboxId ? `https://3003-${chatSandboxId}.e2b.app` : null
       const isRemoteChat = !!(agentChat as any)?.isRemote || !!chatSandboxId
 
+      // Fast path for existing chats. Only inspect messages when a local empty-chat provider override
+      // might require transport recreation.
+      const existing = agentChatStore.get(subChatId)
+      if (existing) {
+        if (isRemoteChat) return existing
+
+        const overrideProvider = subChatProviderOverrides[subChatId]
+        if (!overrideProvider) return existing
+
+        const existingProvider: "claude-code" | "codex" =
+          (existing as any)?.transport instanceof ACPChatTransport
+            ? "codex"
+            : "claude-code"
+        if (existingProvider === overrideProvider) return existing
+
+        const subChatForOverride = agentSubChats.find((sc) => sc.id === subChatId)
+        const rawExistingMessages = subChatForOverride?.messages
+        const existingMessageCount = Array.isArray(rawExistingMessages)
+          ? rawExistingMessages.length
+          : typeof rawExistingMessages === "string"
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(rawExistingMessages)
+                  return Array.isArray(parsed) ? parsed.length : 0
+                } catch {
+                  return 0
+                }
+              })()
+            : 0
+
+        if (existingMessageCount > 0) return existing
+        agentChatStore.delete(subChatId)
+      }
+
+      // Find sub-chat data
+      const subChat = agentSubChats.find((sc) => sc.id === subChatId)
+      const rawMessages = subChat?.messages
+      const messages = Array.isArray(rawMessages)
+        ? rawMessages
+        : typeof rawMessages === "string"
+          ? (() => {
+              try {
+                const parsed = JSON.parse(rawMessages)
+                return Array.isArray(parsed) ? parsed : []
+              } catch {
+                return []
+              }
+            })()
+          : []
+
+      // Get mode from store metadata (falls back to currentMode)
+      const subChatMeta = useAgentSubChatStore
+        .getState()
+        .allSubChats.find((sc) => sc.id === subChatId)
+      const subChatMode = subChatMeta?.mode || currentMode
+
+      const chatProvider = inferProviderFromMessages(subChatId)
+
       console.log("[getOrCreateChat] Transport selection", {
         subChatId: subChatId.slice(-8),
         isRemoteChat,
@@ -6011,7 +6468,7 @@ Make sure to preserve all functionality from both branches when resolving confli
         worktreePath: worktreePath ? "exists" : "none",
       })
 
-      let transport: IPCChatTransport | RemoteChatTransport | null = null
+      let transport: IPCChatTransport | RemoteChatTransport | ACPChatTransport | null = null
 
       if (isRemoteChat && chatSandboxUrl) {
         // Remote sandbox chat: use HTTP SSE transport
@@ -6027,14 +6484,26 @@ Make sure to preserve all functionality from both branches when resolving confli
           model: modelString,
         })
       } else if (worktreePath) {
-        // Local worktree chat: use IPC transport
-        transport = new IPCChatTransport({
-          chatId,
-          subChatId,
-          cwd: worktreePath,
-          projectPath,
-          mode: subChatMode,
-        })
+        if (chatProvider === "codex") {
+          console.log("[getOrCreateChat] Using ACPChatTransport", { provider: chatProvider })
+          transport = new ACPChatTransport({
+            chatId,
+            subChatId,
+            cwd: worktreePath,
+            projectPath,
+            mode: subChatMode,
+            provider: "codex",
+          })
+        } else {
+          // Local worktree chat: use IPC transport
+          transport = new IPCChatTransport({
+            chatId,
+            subChatId,
+            cwd: worktreePath,
+            projectPath,
+            mode: subChatMode,
+          })
+        }
       }
 
       if (!transport) {
@@ -6098,10 +6567,13 @@ Make sure to preserve all functionality from both branches when resolving confli
                   // Ignore audio errors
                 }
               }
-
-              // Show native notification (desktop app, when window not focused)
-              notifyAgentComplete(agentChat?.name || "Agent")
             }
+          }
+
+          // Show native notification if not manually aborted
+          // (the hook handles focus/preference checks internally)
+          if (!wasManuallyAborted) {
+            notifyAgentComplete(agentChat?.name || "Agent")
           }
 
           // Refresh diff stats after agent finishes making changes
@@ -6125,6 +6597,8 @@ Make sure to preserve all functionality from both branches when resolving confli
       worktreePath,
       chatId,
       currentMode,
+      inferProviderFromMessages,
+      subChatProviderOverrides,
       setSubChatUnseenChanges,
       selectedChatId,
       setUnseenChanges,
@@ -6132,11 +6606,49 @@ Make sure to preserve all functionality from both branches when resolving confli
     ],
   )
 
+  const handleProviderChange = useCallback(
+    (subChatId: string, nextProvider: "claude-code" | "codex") => {
+      // Provider switch is only allowed for brand new sub-chats.
+      const activeChat = agentChatStore.get(subChatId) as any
+      let messageCount = Array.isArray(activeChat?.messages)
+        ? activeChat.messages.length
+        : 0
+
+      if (messageCount === 0) {
+        const subChat = agentSubChats.find((sc) => sc.id === subChatId)
+        const rawMessages = subChat?.messages
+        if (Array.isArray(rawMessages)) {
+          messageCount = rawMessages.length
+        } else if (typeof rawMessages === "string") {
+          try {
+            const parsed = JSON.parse(rawMessages)
+            messageCount = Array.isArray(parsed) ? parsed.length : 0
+          } catch {
+            messageCount = 0
+          }
+        }
+      }
+
+      if (messageCount > 0) return
+
+      setSubChatProviderOverrides((prev) => ({
+        ...prev,
+        [subChatId]: nextProvider,
+      }))
+
+      // Force transport recreation with the newly selected provider.
+      agentChatStore.delete(subChatId)
+      forceUpdate({})
+    },
+    [agentSubChats],
+  )
+
   // Handle creating a new sub-chat
   const handleCreateNewSubChat = useCallback(async () => {
     const store = useAgentSubChatStore.getState()
     // New sub-chats use the user's default mode preference
     const newSubChatMode = defaultAgentMode
+    const newSubChatProvider = inferProviderFromMessages(activeSubChatId || undefined)
 
     // Check if this is a remote sandbox chat
     const isRemoteChat = !!(agentChat as any)?.isRemote
@@ -6182,6 +6694,10 @@ Make sure to preserve all functionality from both branches when resolving confli
 
     // Track this subchat as just created for typewriter effect
     setJustCreatedIds((prev) => new Set([...prev, newId]))
+    setSubChatProviderOverrides((prev) => ({
+      ...prev,
+      [newId]: newSubChatProvider,
+    }))
 
     // Add to allSubChats with placeholder name
     store.addToAllSubChats({
@@ -6211,7 +6727,8 @@ Make sure to preserve all functionality from both branches when resolving confli
       newSubChatSandboxUrl,
     })
 
-    let newSubChatTransport: IPCChatTransport | RemoteChatTransport | null = null
+    const chatProvider = newSubChatProvider
+    let newSubChatTransport: IPCChatTransport | RemoteChatTransport | ACPChatTransport | null = null
 
     if (isNewSubChatRemote && newSubChatSandboxUrl) {
       // Remote sandbox chat: use HTTP SSE transport
@@ -6226,14 +6743,26 @@ Make sure to preserve all functionality from both branches when resolving confli
         model: modelString,
       })
     } else if (worktreePath) {
-      // Local worktree chat: use IPC transport
-      newSubChatTransport = new IPCChatTransport({
-        chatId,
-        subChatId: newId,
-        cwd: worktreePath,
-        projectPath,
-        mode: newSubChatMode,
-      })
+      if (chatProvider === "codex") {
+        console.log("[createNewSubChat] Using ACPChatTransport", { provider: chatProvider })
+        newSubChatTransport = new ACPChatTransport({
+          chatId,
+          subChatId: newId,
+          cwd: worktreePath,
+          projectPath,
+          mode: newSubChatMode,
+          provider: "codex",
+        })
+      } else {
+        // Local worktree chat: use IPC transport
+        newSubChatTransport = new IPCChatTransport({
+          chatId,
+          subChatId: newId,
+          cwd: worktreePath,
+          projectPath,
+          mode: newSubChatMode,
+        })
+      }
     }
 
     if (newSubChatTransport) {
@@ -6294,10 +6823,13 @@ Make sure to preserve all functionality from both branches when resolving confli
                   // Ignore audio errors
                 }
               }
-
-              // Show native notification (desktop app, when window not focused)
-              notifyAgentComplete(agentChat?.name || "Agent")
             }
+          }
+
+          // Show native notification if not manually aborted
+          // (the hook handles focus/preference checks internally)
+          if (!wasManuallyAborted) {
+            notifyAgentComplete(agentChat?.name || "Agent")
           }
 
           // Refresh diff stats after agent finishes making changes
@@ -6315,6 +6847,8 @@ Make sure to preserve all functionality from both branches when resolving confli
     worktreePath,
     chatId,
     defaultAgentMode,
+    activeSubChatId,
+    inferProviderFromMessages,
     utils,
     setSubChatUnseenChanges,
     selectedChatId,
@@ -6960,9 +7494,11 @@ Make sure to preserve all functionality from both branches when resolving confli
                       chat={chat}
                       subChatId={subChatId}
                       parentChatId={chatId}
+                      provider={inferProviderFromMessages(subChatId)}
                       isFirstSubChat={isFirstSubChat}
                       onAutoRename={handleAutoRename}
                       onCreateNewSubChat={handleCreateNewSubChat}
+                      onProviderChange={handleProviderChange}
                       teamId={selectedTeamId || undefined}
                       repository={repository}
                       streamId={agentChatStore.getStreamId(subChatId)}
@@ -6974,6 +7510,9 @@ Make sure to preserve all functionality from both branches when resolving confli
                       onRestoreWorkspace={handleRestoreWorkspace}
                       existingPrUrl={agentChat?.prUrl}
                       isActive={isActive}
+                      workspaceName={agentChat?.name ?? null}
+                      workspaceBranch={agentChat?.branch ?? null}
+                      workspaceRepoName={(agentChat as any)?.project?.gitRepo || (agentChat as any)?.project?.name || null}
                     />
                   </div>
                 )
@@ -7269,6 +7808,7 @@ Make sure to preserve all functionality from both branches when resolving confli
         {worktreePath && (
           <TerminalSidebar
             chatId={chatId}
+            scopeKey={terminalScopeKey}
             cwd={worktreePath}
             workspaceId={chatId}
           />
@@ -7320,6 +7860,7 @@ Make sure to preserve all functionality from both branches when resolving confli
               // Open the diff sidebar
               setIsDiffSidebarOpen(true)
             }}
+            onOpenFile={setFileViewerPath}
             remoteInfo={remoteInfo}
             isRemoteChat={!!remoteInfo}
           />
@@ -7341,6 +7882,7 @@ Make sure to preserve all functionality from both branches when resolving confli
         >
           <TerminalBottomPanelContent
             chatId={chatId}
+            scopeKey={terminalScopeKey}
             cwd={worktreePath}
             workspaceId={chatId}
             onClose={() => setIsTerminalSidebarOpen(false)}

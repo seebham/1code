@@ -113,6 +113,11 @@ const SidebarSearchHistoryPopover = memo(function SidebarSearchHistoryPopover({
 }: SidebarSearchHistoryPopoverProps) {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
 
+  const handleSelect = useCallback((subChat: SubChatMeta) => {
+    onSelect(subChat)
+    setIsHistoryOpen(false)
+  }, [onSelect])
+
   const renderItem = useCallback((subChat: SubChatMeta) => {
     const timeAgo = formatTimeAgo(subChat.updated_at || subChat.created_at)
     const isLoading = loadingSubChats.has(subChat.id)
@@ -153,7 +158,7 @@ const SidebarSearchHistoryPopover = memo(function SidebarSearchHistoryPopover({
       isOpen={isHistoryOpen}
       onOpenChange={setIsHistoryOpen}
       items={sortedSubChats}
-      onSelect={onSelect}
+      onSelect={handleSelect}
       placeholder="Search chats..."
       emptyMessage="No results"
       getItemValue={(subChat) => `${subChat.name || "New Chat"} ${subChat.id}`}
@@ -709,8 +714,6 @@ export function AgentsSubChatsSidebar({
       state.addToOpenSubChats(subChat.id)
     }
     state.setActiveSubChat(subChat.id)
-
-    setIsHistoryOpen(false)
   }, [])
 
   // Sort sub-chats by most recent first for history

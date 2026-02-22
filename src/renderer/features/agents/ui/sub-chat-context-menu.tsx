@@ -13,9 +13,16 @@ import { isDesktopApp } from "../../../lib/utils/platform"
 import type { SubChatMeta } from "../stores/sub-chat-store"
 import { useResolvedHotkeyDisplay } from "../../../lib/hotkeys"
 import { exportChat, copyChat, type ExportFormat } from "../lib/export-chat"
+import { toast } from "sonner"
 
-const openInNewWindow = (chatId: string, subChatId: string) => {
-  window.desktopApi?.newWindow({ chatId, subChatId })
+const openInNewWindow = async (chatId: string, subChatId: string) => {
+  const result = await window.desktopApi?.newWindow({ chatId, subChatId })
+  if (result?.blocked) {
+    toast.info("This workspace is already open in another window", {
+      description: "Switching to the existing window.",
+      duration: 3000,
+    })
+  }
 }
 
 // Platform-aware keyboard shortcut for close tab

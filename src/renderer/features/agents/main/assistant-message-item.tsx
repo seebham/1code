@@ -1,9 +1,15 @@
 "use client"
 
 import { useAtomValue } from "jotai"
-import { ListTree } from "lucide-react"
+import { ListTree, MoreHorizontal } from "lucide-react"
 import { memo, useCallback, useContext, useMemo, useState } from "react"
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu"
 import { CollapseIcon, ExpandIcon, PlanIcon } from "../../../components/ui/icons"
 import { TextShimmer } from "../../../components/ui/text-shimmer"
 import { cn } from "../../../lib/utils"
@@ -24,8 +30,9 @@ import { AgentPlanTool } from "../ui/agent-plan-tool"
 import { AgentTaskTool } from "../ui/agent-task-tool"
 import { AgentThinkingTool } from "../ui/agent-thinking-tool"
 import { AgentTodoTool } from "../ui/agent-todo-tool"
+import { AgentMcpToolCall } from "../ui/agent-mcp-tool-call"
 import { AgentToolCall } from "../ui/agent-tool-call"
-import { AgentToolRegistry, getToolStatus } from "../ui/agent-tool-registry"
+import { AgentToolRegistry, getToolStatus, parseMcpToolType } from "../ui/agent-tool-registry"
 import { AgentWebFetchTool } from "../ui/agent-web-fetch-tool"
 import { AgentWebSearchCollapsible } from "../ui/agent-web-search-collapsible"
 import {
@@ -35,7 +42,115 @@ import {
 } from "../ui/message-action-buttons"
 import { useFileOpen } from "../mentions"
 import { GitActivityBadges } from "../ui/git-activity-badges"
+import { ForkContext } from "./isolated-message-group"
 import { MemoizedTextPart } from "./memoized-text-part"
+
+// Map first word of an ACP tool title to a canonical Claude Code tool type.
+// Codex tool calls arrive with type = "tool-Read README.md", "tool-Run echo ---",
+// "tool-List /Users/...", "tool-Search *.test.ts in backend", etc.
+// input.toolName contains the full ACP title, input.args the raw codex parameters.
+const ACP_VERB_TO_TOOL_TYPE: Record<string, string> = {
+  Read: "Read",
+  Run: "Bash",
+  List: "Glob",
+  Search: "Grep",
+  Grep: "Grep",
+  Glob: "Glob",
+  Edit: "Edit",
+  Write: "Write",
+  Thought: "Thinking",
+  Fetch: "WebFetch",
+}
+
+// Check if a part.type looks like an ACP title-based type (e.g. "tool-Read README.md")
+// Returns the verb if matched, null otherwise
+function getAcpVerb(partType: string): string | null {
+  if (!partType.startsWith("tool-")) return null
+  const afterTool = partType.slice(5) // strip "tool-"
+  // Check if it starts with a known verb followed by space or end-of-string
+  for (const verb of Object.keys(ACP_VERB_TO_TOOL_TYPE)) {
+    if (afterTool === verb || afterTool.startsWith(verb + " ")) {
+      return verb
+    }
+  }
+  return null
+}
+
+// Normalize ACP/codex tool parts into canonical types so grouping and rendering work.
+// Handles two formats:
+// 1. Streaming: type="tool-acp.acp_provider_agent_dynamic_tool", input={toolName, args}
+// 2. Persisted/live: type="tool-Read README.md", input={toolName, args}
+function normalizeAcpParts(parts: any[]): any[] {
+  return parts.map((part) => {
+    if (!part.type?.startsWith("tool-")) return part
+
+    // Guard: only process ACP parts, not Claude Code parts.
+    // ACP parts have: input.toolName, or space in type (e.g. "tool-Read README.md"),
+    // or the proxy tool name. Claude Code parts have exact types like "tool-Read".
+    const isAcpPart = part.input?.toolName || part.type.includes(" ") || part.type === "tool-acp.acp_provider_agent_dynamic_tool"
+    if (!isAcpPart) return part
+
+    // Determine the ACP title — either from the type itself or from input.toolName
+    let title: string | null = null
+    let args: Record<string, any> = {}
+
+    // Case 1: type is already the title-based type (e.g. "tool-Read README.md")
+    const verb = getAcpVerb(part.type)
+    if (verb) {
+      title = part.input?.toolName || part.type.slice(5)
+      args = part.input?.args ?? {}
+    }
+
+    // Case 2: type is the ACP proxy tool name
+    if (!verb && part.type === "tool-acp.acp_provider_agent_dynamic_tool") {
+      let input = part.input
+      if (typeof input === "string") {
+        try { input = JSON.parse(input) } catch { return part }
+      }
+      if (input?.toolName) {
+        title = input.toolName
+        args = input.args ?? {}
+      }
+    }
+
+    if (!title) return part
+
+    // Parse the first word of the title to get canonical tool type
+    const spaceIdx = title.indexOf(" ")
+    const titleVerb = spaceIdx === -1 ? title : title.slice(0, spaceIdx)
+    const detail = spaceIdx === -1 ? "" : title.slice(spaceIdx + 1)
+    const canonicalType = ACP_VERB_TO_TOOL_TYPE[titleVerb]
+
+    if (!canonicalType) return part
+
+    // Enrich input with fields that the tool registry expects for display
+    const enrichedInput: Record<string, any> = { ...args, _acpTitle: title, _acpDetail: detail }
+    if (canonicalType === "Read" && !enrichedInput.file_path && detail) {
+      enrichedInput.file_path = detail
+    }
+    if (canonicalType === "Bash") {
+      // Codex passes command as array ['/bin/zsh', '-lc', 'actual command'] — extract shell string
+      if (Array.isArray(enrichedInput.command)) {
+        enrichedInput.command = enrichedInput.command[enrichedInput.command.length - 1] || detail
+      } else if (!enrichedInput.command && detail) {
+        enrichedInput.command = detail
+      }
+    }
+    if (canonicalType === "Grep" && !enrichedInput.pattern && detail) {
+      enrichedInput.pattern = detail
+    }
+    if (canonicalType === "Glob" && !enrichedInput.pattern && detail) {
+      enrichedInput.pattern = detail
+    }
+
+    return {
+      ...part,
+      type: `tool-${canonicalType}`,
+      input: enrichedInput,
+      output: part.output,
+    }
+  })
+}
 
 // Exploring tools - these get grouped when 3+ consecutive
 const EXPLORING_TOOLS = new Set([
@@ -53,6 +168,60 @@ const TASK_TOOLS = new Set([
   "tool-TaskGet",
   "tool-TaskList",
 ])
+
+const STREAMING_REASONING_STATES = new Set(["streaming", "in_progress", "input-streaming"])
+const DONE_REASONING_STATES = new Set(["done", "completed", "result", "output-available"])
+const ERROR_REASONING_STATES = new Set(["error", "output-error"])
+
+function mapReasoningStateToThinkingState(state: unknown): string {
+  if (typeof state !== "string") {
+    return "output-available"
+  }
+
+  const normalized = state.trim().toLowerCase()
+  if (STREAMING_REASONING_STATES.has(normalized)) return "input-streaming"
+  if (DONE_REASONING_STATES.has(normalized)) return "output-available"
+  if (ERROR_REASONING_STATES.has(normalized)) return "output-error"
+  return "output-available"
+}
+
+function getThinkingText(part: any): string {
+  if (typeof part?.input?.text === "string") return part.input.text
+  if (typeof part?.text === "string") return part.text
+  return ""
+}
+
+function toThinkingToolPart(part: any, messageId: string | undefined, index: number): any {
+  const normalizedState = mapReasoningStateToThinkingState(part.state)
+  const text = getThinkingText(part)
+  const normalizedPart = {
+    ...part,
+    type: "tool-Thinking",
+    toolCallId:
+      typeof part.toolCallId === "string" && part.toolCallId.length > 0
+        ? part.toolCallId
+        : typeof part.id === "string" && part.id.length > 0
+          ? part.id
+          : `reasoning-${messageId || "message"}-${index}`,
+    toolName: typeof part.toolName === "string" ? part.toolName : "Thinking",
+    input: {
+      ...(part.input && typeof part.input === "object" ? part.input : {}),
+      text,
+    },
+    state: normalizedState,
+  }
+
+  if (normalizedState !== "output-available") {
+    return normalizedPart
+  }
+
+  const completedResult = { completed: true }
+  return {
+    ...normalizedPart,
+    result: normalizedPart.result ?? completedResult,
+    output: normalizedPart.output ?? completedResult,
+  }
+}
 
 
 // Group consecutive exploring tools into exploring-group
@@ -187,6 +356,24 @@ interface MessageStateSnapshot {
 }
 const messageStateCache = new Map<string, MessageStateSnapshot>()
 
+function getTrackedPartTextLength(part: any): number {
+  if (part?.type === "text") {
+    return typeof part.text === "string" ? part.text.length : 0
+  }
+
+  if (part?.type === "reasoning") {
+    return typeof part.text === "string" ? part.text.length : 0
+  }
+
+  if (part?.type === "tool-Thinking") {
+    if (typeof part?.input?.text === "string") return part.input.text.length
+    if (typeof part?.text === "string") return part.text.length
+    return 0
+  }
+
+  return -1
+}
+
 // Custom comparison - check if message content actually changed
 // CRITICAL: AI SDK mutates objects in-place! So prev.message.parts[i].text === next.message.parts[i].text
 // even when text HAS changed (they're the same mutated object).
@@ -216,9 +403,7 @@ function areMessagePropsEqual(
   const lastPart = nextParts[nextParts.length - 1]
 
   const currentState: MessageStateSnapshot = {
-    textLengths: nextParts.map((p: any) =>
-      p.type === "text" ? (p.text?.length || 0) : -1
-    ),
+    textLengths: nextParts.map((p: any) => getTrackedPartTextLength(p)),
     // Track ALL part states - critical for detecting Edit plan file streaming!
     partStates: nextParts.map((p: any) => p.state),
     // Track tool input changes - this is critical for tool streaming!
@@ -280,8 +465,12 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
   const selectedProject = useAtomValue(selectedProjectAtom)
   const projectPath = selectedProject?.path
   const onOpenFile = useFileOpen()
+  const onFork = useContext(ForkContext)
   const isDev = import.meta.env.DEV
-  const messageParts = message?.parts || []
+  // Normalize ACP/codex tool parts into canonical types (e.g. "tool-Read README.md" → "tool-Read").
+  // Note: no useMemo — AI SDK mutates parts in-place, so the array reference
+  // doesn't change and useMemo would return stale results.
+  const messageParts = normalizeAcpParts(message?.parts || [])
 
   const contentParts = useMemo(() =>
     messageParts.filter((p: any) => p.type !== "step-start"),
@@ -485,7 +674,15 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
     }
 
     if (part.type === "tool-Bash") return <AgentBashTool key={idx} part={part} messageId={message.id} partIndex={idx} chatStatus={status} />
-    if (part.type === "tool-Thinking") return <AgentThinkingTool key={idx} part={part} chatStatus={status} />
+    if (part.type === "reasoning" || part.type === "tool-Thinking") {
+      return (
+        <AgentThinkingTool
+          key={idx}
+          part={toThinkingToolPart(part, message?.id, idx)}
+          chatStatus={status}
+        />
+      )
+    }
 
     // Plan files: unified handling
     // - In collapsed steps: all show mini indicator, last collapsed op's card shown separately after finalParts
@@ -593,6 +790,19 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
           isPending={isPending}
           isError={isError}
           onClick={handleClick}
+        />
+      )
+    }
+
+    // MCP tool calls (pattern: tool-mcp__<server>__<tool>)
+    const mcpInfo = parseMcpToolType(part.type)
+    if (mcpInfo) {
+      return (
+        <AgentMcpToolCall
+          key={idx}
+          part={part}
+          mcpInfo={mcpInfo}
+          chatStatus={status}
         />
       )
     }
@@ -721,7 +931,26 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
               isMobile={isMobile}
             />
           </div>
-          <AgentMessageUsage metadata={msgMetadata} isStreaming={isStreaming} isMobile={isMobile} />
+          <div className="flex items-center gap-0.5">
+            <AgentMessageUsage metadata={msgMetadata} isStreaming={isStreaming} isMobile={isMobile} />
+            {onFork && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    tabIndex={-1}
+                    className="p-1 rounded-md transition-[background-color,transform] duration-150 ease-out hover:bg-accent active:scale-[0.97]"
+                  >
+                    <MoreHorizontal className="w-3.5 h-3.5 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[160px]">
+                  <DropdownMenuItem onClick={() => onFork(message.id)}>
+                    Fork from here
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
       )}
 
