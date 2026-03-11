@@ -1,8 +1,9 @@
 {
   "name": "1code",
-  "version": "0.0.66",
+  "version": "0.0.72",
   "private": true,
   "description": "1Code - UI for parallel work with AI agents",
+  "homepage": "https://21st.dev",
   "author": {
     "name": "21st.dev",
     "email": "support@21st.dev"

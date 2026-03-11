@@ -142,14 +142,17 @@ Learn more at [1code.dev/agents/api](https://1code.dev/agents/api)
 ### Option 1: Build from source (free)
 
 ```bash
-# Prerequisites: Bun, Python, Xcode Command Line Tools (macOS)
+# Prerequisites: Bun, Python 3.11, setuptools, Xcode Command Line Tools (macOS)
 bun install
 bun run claude:download  # Download Claude binary (required!)
+bun run codex:download   # Download Codex binary (required!)
 bun run build
 bun run package:mac  # or package:win, package:linux
 ```
 
-> **Important:** The `claude:download` step downloads the Claude CLI binary which is required for the agent chat to work. If you skip this step, the app will build but agent functionality won't work.
+> **Important:** The `claude:download` and `codex:download` steps download required agent binaries. If you skip them, the app may build but agent functionality will not work correctly.
+>
+> **Python note:** Python 3.11 is recommended for native module rebuilds. On Python 3.12+, make sure `setuptools` is installed (`pip install setuptools`).
 
 ### Option 2: Subscribe to 1code.dev (recommended)
 
@@ -162,6 +165,7 @@ Your subscription helps us maintain and improve 1Code.
 ```bash
 bun install
 bun run claude:download  # First time only
+bun run codex:download   # First time only
 bun run dev
 ```
 
