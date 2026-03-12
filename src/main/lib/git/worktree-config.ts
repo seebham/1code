@@ -103,7 +103,8 @@ function getPnpmFallbackCommands(cmd: string, home: string): string[] {
 
 function isPnpmNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
-  const withStreams = error as Error & { stderr?: string; stdout?: string }
+  const withStreams = error as Error & { stderr?: string; stdout?: string; code?: number | string }
+  if (withStreams.code === 127) return true
   const combined = `${error.message}\n${withStreams.stderr || ""}\n${withStreams.stdout || ""}`
   return /pnpm:\s*command not found|command not found:\s*pnpm/i.test(combined)
 }
