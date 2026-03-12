@@ -101,6 +101,20 @@ function getPnpmFallbackCommands(cmd: string, home: string): string[] {
   ]
 }
 
+function buildPathWithPrependedDirs(
+  existingPath: string | undefined,
+  dirs: string[],
+): string {
+  const merged = [...dirs, ...(existingPath ? existingPath.split(":") : [])]
+  const seen = new Set<string>()
+  const unique = merged.filter((entry) => {
+    if (!entry || seen.has(entry)) return false
+    seen.add(entry)
+    return true
+  })
+  return unique.join(":")
+}
+
 function isPnpmNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   const withStreams = error as Error & { stderr?: string; stdout?: string; code?: number | string }
@@ -337,12 +351,17 @@ export async function executeWorktreeSetup(
 
   const shellEnv = await getShellEnvironment()
   const shell = process.env.SHELL || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash")
+  const home = shellEnv.HOME || process.env.HOME || homedir()
+  const pnpmHome = join(home, ".local", "share", "pnpm")
   const commandEnv = {
     ...process.env,
     ...shellEnv,
+    PNPM_HOME: shellEnv.PNPM_HOME || pnpmHome,
+    PATH: buildPathWithPrependedDirs(shellEnv.PATH || process.env.PATH, [
+      shellEnv.PNPM_HOME || pnpmHome,
+    ]),
     ROOT_WORKTREE_PATH: mainRepoPath,
   }
-  const home = commandEnv.HOME || homedir()
   const setupDiagnostics = await collectShellDiagnostics(shell, worktreePath, commandEnv)
   for (const line of setupDiagnostics) {
     console.log(`[worktree-setup] ${line}`)
@@ -369,9 +388,19 @@ export async function executeWorktreeSetup(
 
       for (const candidate of candidates) {
         try {
+          const candidatePnpmDir = candidate.startsWith("/")
+            ? candidate.split(" ")[0].replace(/\/[^/]+$/, "")
+            : ""
+          const candidateEnv = {
+            ...commandEnv,
+            PATH: buildPathWithPrependedDirs(commandEnv.PATH, [
+              candidatePnpmDir,
+              commandEnv.PNPM_HOME || pnpmHome,
+            ]),
+          }
           const execResult = await execFileAsync(shell, ["-lc", candidate], {
             cwd: worktreePath,
-            env: commandEnv,
+            env: candidateEnv,
             timeout: SETUP_COMMAND_TIMEOUT_MS,
           })
           stdout = execResult.stdout
