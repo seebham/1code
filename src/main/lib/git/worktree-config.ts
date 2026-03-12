@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, access } from "node:fs/promises"
 import { join, dirname, isAbsolute } from "node:path"
 import { exec } from "node:child_process"
 import { promisify } from "node:util"
+import { getShellEnvironment } from "./shell-env"
 
 const execAsync = promisify(exec)
 const SETUP_COMMAND_TIMEOUT_MS = 900_000 // 15 minutes (pnpm install can be slow in large repos)
@@ -274,6 +275,13 @@ export async function executeWorktreeSetup(
     completedCommands: 0,
   })
 
+  const shellEnv = await getShellEnvironment()
+  const commandEnv = {
+    ...process.env,
+    ...shellEnv,
+    ROOT_WORKTREE_PATH: mainRepoPath,
+  }
+
   // Execute each command
   for (const [index, cmd] of runnableCommands.entries()) {
     try {
@@ -288,10 +296,7 @@ export async function executeWorktreeSetup(
 
       const { stdout, stderr } = await execAsync(cmd, {
         cwd: worktreePath,
-        env: {
-          ...process.env,
-          ROOT_WORKTREE_PATH: mainRepoPath,
-        },
+        env: commandEnv,
         timeout: SETUP_COMMAND_TIMEOUT_MS,
       })
 
