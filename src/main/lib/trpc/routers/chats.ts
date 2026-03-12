@@ -19,7 +19,7 @@ import {
   removeWorktree,
   sanitizeProjectName,
 } from "../../git"
-import type { WorktreeSetupResult } from "../../git/worktree-config"
+import type { WorktreeSetupProgress, WorktreeSetupResult } from "../../git/worktree-config"
 import { computeContentHash, gitCache } from "../../git/cache"
 import { splitUnifiedDiffByFile } from "../../git/diff-parser"
 import { execWithShellEnv } from "../../git/shell-env"
@@ -32,6 +32,42 @@ type WorktreeSetupFailurePayload = {
   kind: "create-failed" | "setup-failed"
   message: string
   projectId: string
+  chatId?: string
+}
+
+type WorktreeSetupProgressPayload = {
+  projectId: string
+  chatId: string
+  phase: WorktreeSetupProgress["phase"]
+  totalCommands: number
+  completedCommands: number
+  commandIndex?: number
+  currentCommand?: string
+  success?: boolean
+  error?: string
+}
+
+function sendWorktreeSetupProgress(
+  windowId: number | null,
+  payload: WorktreeSetupProgressPayload,
+): void {
+  const targets: BrowserWindow[] = []
+
+  if (windowId !== null) {
+    const window = BrowserWindow.fromId(windowId)
+    if (window && !window.isDestroyed()) {
+      targets.push(window)
+    }
+  }
+
+  if (targets.length === 0) {
+    targets.push(...BrowserWindow.getAllWindows())
+  }
+
+  for (const window of targets) {
+    if (window.isDestroyed()) continue
+    window.webContents.send("worktree:setup-progress", payload)
+  }
 }
 
 function sendWorktreeSetupFailure(
@@ -395,6 +431,19 @@ export const chatsRouter = router({
           input.baseBranch,
           input.branchType,
           {
+            onSetupProgress: (progress) => {
+              sendWorktreeSetupProgress(requestingWindowId, {
+                projectId: project.id,
+                chatId: chat.id,
+                phase: progress.phase,
+                totalCommands: progress.totalCommands,
+                completedCommands: progress.completedCommands,
+                commandIndex: progress.commandIndex,
+                currentCommand: progress.currentCommand,
+                success: progress.success,
+                error: progress.error,
+              })
+            },
             onSetupComplete: (setupResult: WorktreeSetupResult) => {
               if (setupResult.success) return
               const message =
@@ -404,6 +453,7 @@ export const chatsRouter = router({
                 kind: "setup-failed",
                 message,
                 projectId: project.id,
+                chatId: chat.id,
               })
             },
           },
@@ -430,6 +480,7 @@ export const chatsRouter = router({
             kind: "create-failed",
             message: result.error || "Worktree creation failed.",
             projectId: project.id,
+            chatId: chat.id,
           })
           // Fallback to project path
           db.update(chats)

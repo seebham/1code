@@ -186,6 +186,7 @@ export function AgentsLayout() {
 
   // Track if this is the initial load - skip auto-open on first load to respect saved state
   const isInitialLoadRef = useRef(true)
+  const worktreeSetupToastIdsRef = useRef<Map<string, string | number>>(new Map())
 
   // Auto-open sidebar when project is selected, close when no project
   // Skip on initial load to preserve user's saved sidebar preference
@@ -212,8 +213,19 @@ export function AgentsLayout() {
     const desktopApi = window.desktopApi as any
     if (!desktopApi?.onWorktreeSetupFailed) return
 
-    const unsubscribe = desktopApi.onWorktreeSetupFailed((payload: { kind: "create-failed" | "setup-failed"; message: string; projectId: string }) => {
-      const errorMessage = payload.message.replace(/\s+/g, " ").trim()
+    const unsubscribe = desktopApi.onWorktreeSetupFailed((payload: { kind: "create-failed" | "setup-failed"; message: string; projectId: string; chatId?: string }) => {
+      const toastKey = payload.chatId
+        ? `${payload.projectId}:${payload.chatId}`
+        : null
+      if (toastKey) {
+        const existingToastId = worktreeSetupToastIdsRef.current.get(toastKey)
+        if (existingToastId !== undefined) {
+          toast.dismiss(existingToastId)
+          worktreeSetupToastIdsRef.current.delete(toastKey)
+        }
+      }
+
+      const errorMessage = payload.message.trim()
       const title =
         payload.kind === "create-failed"
           ? "Worktree creation failed"
@@ -238,6 +250,89 @@ export function AgentsLayout() {
 
     return unsubscribe
   }, [projects, setSelectedProject, setSettingsActiveTab, setSettingsDialogOpen])
+
+  // Worktree setup progress from main process
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const desktopApi = window.desktopApi as any
+    if (!desktopApi?.onWorktreeSetupProgress) return
+    const truncateCommand = (command?: string) => {
+      if (!command) return "Running setup command"
+      const trimmed = command.trim()
+      if (trimmed.length <= 48) return trimmed
+      return `${trimmed.slice(0, 45)}...`
+    }
+
+    const unsubscribe = desktopApi.onWorktreeSetupProgress((payload: {
+      projectId: string
+      chatId: string
+      phase: "started" | "command-started" | "command-completed" | "completed"
+      totalCommands: number
+      completedCommands: number
+      commandIndex?: number
+      currentCommand?: string
+      success?: boolean
+      error?: string
+    }) => {
+      const toastKey = `${payload.projectId}:${payload.chatId}`
+      const existingToastId = worktreeSetupToastIdsRef.current.get(toastKey)
+
+      if (payload.phase === "started") {
+        if (existingToastId !== undefined) {
+          toast.dismiss(existingToastId)
+        }
+        const nextToastId = toast.loading("Setting up workspace", {
+          description: `Preparing ${payload.totalCommands} setup commands`,
+          duration: Infinity,
+        })
+        worktreeSetupToastIdsRef.current.set(toastKey, nextToastId)
+        return
+      }
+
+      if (payload.phase === "command-started" && existingToastId !== undefined) {
+        const step = payload.commandIndex || payload.completedCommands + 1
+        toast.loading("Setting up workspace", {
+          id: existingToastId,
+          description: `Step ${step} of ${payload.totalCommands}\nRunning: ${truncateCommand(payload.currentCommand)}`,
+          duration: Infinity,
+        })
+        return
+      }
+
+      if (payload.phase === "command-completed" && existingToastId !== undefined) {
+        const step = payload.commandIndex || payload.completedCommands
+        const statusLabel = payload.success ? "completed" : "failed"
+        const progressText = `${payload.completedCommands} of ${payload.totalCommands} commands completed`
+        toast.loading("Setting up workspace", {
+          id: existingToastId,
+          description: `Step ${step} ${statusLabel}\n${progressText}`,
+          duration: Infinity,
+        })
+        return
+      }
+
+      if (payload.phase === "completed" && existingToastId !== undefined) {
+        if (payload.success) {
+          toast.success("Workspace setup completed", {
+            id: existingToastId,
+            description: `${payload.completedCommands} of ${payload.totalCommands} commands succeeded`,
+            duration: 5000,
+          })
+        } else {
+          toast.dismiss(existingToastId)
+        }
+        worktreeSetupToastIdsRef.current.delete(toastKey)
+      }
+    })
+
+    return () => {
+      unsubscribe()
+      for (const toastId of worktreeSetupToastIdsRef.current.values()) {
+        toast.dismiss(toastId)
+      }
+      worktreeSetupToastIdsRef.current.clear()
+    }
+  }, [])
 
   // Handle sign out
   const handleSignOut = useCallback(async () => {

@@ -232,10 +232,35 @@ contextBridge.exposeInMainWorld("desktopApi", {
   },
 
   // Worktree setup failure events
-  onWorktreeSetupFailed: (callback: (data: { kind: "create-failed" | "setup-failed"; message: string; projectId: string }) => void) => {
-    const handler = (_event: unknown, data: { kind: "create-failed" | "setup-failed"; message: string; projectId: string }) => callback(data)
+  onWorktreeSetupFailed: (callback: (data: { kind: "create-failed" | "setup-failed"; message: string; projectId: string; chatId?: string }) => void) => {
+    const handler = (_event: unknown, data: { kind: "create-failed" | "setup-failed"; message: string; projectId: string; chatId?: string }) => callback(data)
     ipcRenderer.on("worktree:setup-failed", handler)
     return () => ipcRenderer.removeListener("worktree:setup-failed", handler)
+  },
+  onWorktreeSetupProgress: (callback: (data: {
+    projectId: string
+    chatId: string
+    phase: "started" | "command-started" | "command-completed" | "completed"
+    totalCommands: number
+    completedCommands: number
+    commandIndex?: number
+    currentCommand?: string
+    success?: boolean
+    error?: string
+  }) => void) => {
+    const handler = (_event: unknown, data: {
+      projectId: string
+      chatId: string
+      phase: "started" | "command-started" | "command-completed" | "completed"
+      totalCommands: number
+      completedCommands: number
+      commandIndex?: number
+      currentCommand?: string
+      success?: boolean
+      error?: string
+    }) => callback(data)
+    ipcRenderer.on("worktree:setup-progress", handler)
+    return () => ipcRenderer.removeListener("worktree:setup-progress", handler)
   },
 
   // Subscribe to git watcher for a worktree (from renderer)
@@ -379,6 +404,18 @@ export interface DesktopApi {
   onFileChanged: (callback: (data: { filePath: string; type: string; subChatId: string }) => void) => () => void
   // Git status changes (from file watcher)
   onGitStatusChanged: (callback: (data: { worktreePath: string; changes: Array<{ path: string; type: "add" | "change" | "unlink" }> }) => void) => () => void
+  onWorktreeSetupFailed: (callback: (payload: { kind: "create-failed" | "setup-failed"; message: string; projectId: string; chatId?: string }) => void) => () => void
+  onWorktreeSetupProgress: (callback: (payload: {
+    projectId: string
+    chatId: string
+    phase: "started" | "command-started" | "command-completed" | "completed"
+    totalCommands: number
+    completedCommands: number
+    commandIndex?: number
+    currentCommand?: string
+    success?: boolean
+    error?: string
+  }) => void) => () => void
   subscribeToGitWatcher: (worktreePath: string) => Promise<void>
   unsubscribeFromGitWatcher: (worktreePath: string) => Promise<void>
   // VS Code theme scanning

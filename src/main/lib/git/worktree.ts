@@ -12,7 +12,10 @@ import {
 } from "unique-names-generator";
 import { checkGitLfsAvailable, getShellEnvironment } from "./shell-env";
 import { executeWorktreeSetup } from "./worktree-config";
-import type { WorktreeSetupResult } from "./worktree-config";
+import type {
+	WorktreeSetupProgress,
+	WorktreeSetupResult,
+} from "./worktree-config";
 import { generateWorktreeFolderName } from "./worktree-naming";
 
 const execFileAsync = promisify(execFile);
@@ -898,6 +901,7 @@ export interface WorktreeResult {
 
 export interface CreateWorktreeForChatOptions {
 	onSetupComplete?: (result: WorktreeSetupResult) => void;
+	onSetupProgress?: (progress: WorktreeSetupProgress) => void;
 }
 
 /**
@@ -941,7 +945,11 @@ export async function createWorktreeForChat(
 
 		// Run worktree setup commands in BACKGROUND (don't block chat creation)
 		// This allows the user to start chatting immediately while deps install
-		executeWorktreeSetup(worktreePath, projectPath)
+		executeWorktreeSetup(worktreePath, projectPath, {
+			onProgress: (progress) => {
+				options?.onSetupProgress?.(progress);
+			},
+		})
 			.then((setupResult) => {
 				options?.onSetupComplete?.(setupResult);
 				if (!setupResult.success) {

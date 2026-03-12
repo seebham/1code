@@ -22,6 +22,19 @@ export interface WorktreeSetupFailurePayload {
   kind: "create-failed" | "setup-failed"
   message: string
   projectId: string
+  chatId?: string
+}
+
+export interface WorktreeSetupProgressPayload {
+  projectId: string
+  chatId: string
+  phase: "started" | "command-started" | "command-completed" | "completed"
+  totalCommands: number
+  completedCommands: number
+  commandIndex?: number
+  currentCommand?: string
+  success?: boolean
+  error?: string
 }
 
 export interface DesktopApi {
@@ -98,6 +111,7 @@ export interface DesktopApi {
 
   // Worktree setup failures
   onWorktreeSetupFailed: (callback: (payload: WorktreeSetupFailurePayload) => void) => () => void
+  onWorktreeSetupProgress: (callback: (payload: WorktreeSetupProgressPayload) => void) => () => void
 }
 
 declare global {

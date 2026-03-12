@@ -4,6 +4,49 @@ import { exec } from "node:child_process"
 import { promisify } from "node:util"
 
 const execAsync = promisify(exec)
+const SETUP_COMMAND_TIMEOUT_MS = 900_000 // 15 minutes (pnpm install can be slow in large repos)
+
+function formatSetupCommandError(error: unknown, cmd: string): string {
+  const lines: string[] = [`Command failed: ${cmd}`]
+
+  if (error instanceof Error) {
+    const errorWithMeta = error as Error & {
+      stderr?: string
+      stdout?: string
+      code?: number | string
+      signal?: NodeJS.Signals
+      killed?: boolean
+      cmd?: string
+    }
+
+    if (typeof errorWithMeta.code !== "undefined") {
+      lines.push(`exit code: ${String(errorWithMeta.code)}`)
+    }
+    if (errorWithMeta.signal) {
+      lines.push(`signal: ${errorWithMeta.signal}`)
+    }
+    if (errorWithMeta.killed) {
+      lines.push("process killed: true (likely timeout)")
+    }
+
+    const normalizedMessage = error.message.trim()
+    const genericMessage = `Command failed: ${cmd}`
+    if (normalizedMessage && normalizedMessage !== genericMessage) {
+      lines.push(error.message)
+    }
+
+    if (typeof errorWithMeta.stderr === "string" && errorWithMeta.stderr.trim()) {
+      lines.push(`stderr:\n${errorWithMeta.stderr.trim()}`)
+    }
+    if (typeof errorWithMeta.stdout === "string" && errorWithMeta.stdout.trim()) {
+      lines.push(`stdout:\n${errorWithMeta.stdout.trim()}`)
+    }
+  } else {
+    lines.push(String(error))
+  }
+
+  return lines.join("\n\n")
+}
 
 export interface WorktreeConfig {
   "setup-worktree-unix"?: string[] | string
@@ -168,6 +211,22 @@ export interface WorktreeSetupResult {
   errors: string[]
 }
 
+export type WorktreeSetupProgressPhase =
+  | "started"
+  | "command-started"
+  | "command-completed"
+  | "completed"
+
+export interface WorktreeSetupProgress {
+  phase: WorktreeSetupProgressPhase
+  totalCommands: number
+  completedCommands: number
+  commandIndex?: number
+  currentCommand?: string
+  success?: boolean
+  error?: string
+}
+
 /**
  * Execute worktree setup commands
  * Runs after worktree creation to install deps, copy envs, etc.
@@ -175,6 +234,9 @@ export interface WorktreeSetupResult {
 export async function executeWorktreeSetup(
   worktreePath: string,
   mainRepoPath: string,
+  options?: {
+    onProgress?: (progress: WorktreeSetupProgress) => void
+  },
 ): Promise<WorktreeSetupResult> {
   const result: WorktreeSetupResult = {
     success: true,
@@ -199,19 +261,30 @@ export async function executeWorktreeSetup(
 
   // Normalize to array
   const commandList = Array.isArray(commands) ? commands : [commands]
-  if (commandList.length === 0) {
+  const runnableCommands = commandList.filter((command) => command.trim().length > 0)
+  if (runnableCommands.length === 0) {
     result.output.push("Empty command list")
     return result
   }
 
-  console.log(`[worktree-setup] Running ${commandList.length} setup commands in ${worktreePath}`)
+  console.log(`[worktree-setup] Running ${runnableCommands.length} setup commands in ${worktreePath}`)
+  options?.onProgress?.({
+    phase: "started",
+    totalCommands: runnableCommands.length,
+    completedCommands: 0,
+  })
 
   // Execute each command
-  for (const cmd of commandList) {
-    if (!cmd.trim()) continue
-
+  for (const [index, cmd] of runnableCommands.entries()) {
     try {
       result.output.push(`$ ${cmd}`)
+      options?.onProgress?.({
+        phase: "command-started",
+        totalCommands: runnableCommands.length,
+        completedCommands: result.commandsRun,
+        commandIndex: index + 1,
+        currentCommand: cmd,
+      })
 
       const { stdout, stderr } = await execAsync(cmd, {
         cwd: worktreePath,
@@ -219,7 +292,7 @@ export async function executeWorktreeSetup(
           ...process.env,
           ROOT_WORKTREE_PATH: mainRepoPath,
         },
-        timeout: 300_000, // 5 minutes per command
+        timeout: SETUP_COMMAND_TIMEOUT_MS,
       })
 
       if (stdout) {
@@ -230,20 +303,43 @@ export async function executeWorktreeSetup(
       }
 
       result.commandsRun++
+      options?.onProgress?.({
+        phase: "command-completed",
+        totalCommands: runnableCommands.length,
+        completedCommands: result.commandsRun,
+        commandIndex: index + 1,
+        currentCommand: cmd,
+        success: true,
+      })
       console.log(`[worktree-setup] ✓ ${cmd}`)
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error)
+      const errorMsg = formatSetupCommandError(error, cmd)
       result.errors.push(errorMsg)
       result.output.push(`[error] ${errorMsg}`)
+      options?.onProgress?.({
+        phase: "command-completed",
+        totalCommands: runnableCommands.length,
+        completedCommands: result.commandsRun,
+        commandIndex: index + 1,
+        currentCommand: cmd,
+        success: false,
+        error: errorMsg,
+      })
       console.error(`[worktree-setup] ✗ ${cmd}: ${errorMsg}`)
       // Continue with next command, don't fail entirely
     }
   }
 
   result.success = result.errors.length === 0
+  options?.onProgress?.({
+    phase: "completed",
+    totalCommands: runnableCommands.length,
+    completedCommands: result.commandsRun,
+    success: result.success,
+  })
 
   console.log(
-    `[worktree-setup] Completed: ${result.commandsRun}/${commandList.length} commands, ` +
+    `[worktree-setup] Completed: ${result.commandsRun}/${runnableCommands.length} commands, ` +
     `${result.errors.length} errors`
   )
 
