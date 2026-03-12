@@ -105,7 +105,7 @@ function isPnpmNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   const withStreams = error as Error & { stderr?: string; stdout?: string }
   const combined = `${error.message}\n${withStreams.stderr || ""}\n${withStreams.stdout || ""}`
-  return combined.includes("pnpm: command not found")
+  return /pnpm:\s*command not found|command not found:\s*pnpm/i.test(combined)
 }
 
 export interface WorktreeConfig {
