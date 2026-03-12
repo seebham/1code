@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, access } from "node:fs/promises"
 import { join, dirname, isAbsolute } from "node:path"
 import { execFile } from "node:child_process"
+import { homedir } from "node:os"
 import { promisify } from "node:util"
 import { getShellEnvironment } from "./shell-env"
 
@@ -83,6 +84,28 @@ function formatSetupCommandError(error: unknown, cmd: string): string {
   }
 
   return lines.join("\n\n")
+}
+
+function getPnpmFallbackCommands(cmd: string, home: string): string[] {
+  const trimmed = cmd.trim()
+  const match = trimmed.match(/^pnpm(?:\s+(.*))?$/)
+  if (!match) return [cmd]
+
+  const args = match[1] ? ` ${match[1]}` : ""
+  const localHome = home || homedir()
+  return [
+    `pnpm${args}`,
+    `corepack pnpm${args}`,
+    `${join(localHome, ".local", "share", "pnpm", "pnpm")}${args}`,
+    `${join(localHome, ".local", "bin", "pnpm")}${args}`,
+  ]
+}
+
+function isPnpmNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const withStreams = error as Error & { stderr?: string; stdout?: string }
+  const combined = `${error.message}\n${withStreams.stderr || ""}\n${withStreams.stdout || ""}`
+  return combined.includes("pnpm: command not found")
 }
 
 export interface WorktreeConfig {
@@ -318,6 +341,7 @@ export async function executeWorktreeSetup(
     ...shellEnv,
     ROOT_WORKTREE_PATH: mainRepoPath,
   }
+  const home = commandEnv.HOME || homedir()
   const setupDiagnostics = await collectShellDiagnostics(shell, worktreePath, commandEnv)
   for (const line of setupDiagnostics) {
     console.log(`[worktree-setup] ${line}`)
@@ -336,11 +360,40 @@ export async function executeWorktreeSetup(
         currentCommand: cmd,
       })
 
-      const { stdout, stderr } = await execFileAsync(shell, ["-lc", cmd], {
-        cwd: worktreePath,
-        env: commandEnv,
-        timeout: SETUP_COMMAND_TIMEOUT_MS,
-      })
+      const candidates = getPnpmFallbackCommands(cmd, home)
+      let stdout = ""
+      let stderr = ""
+      let finalError: unknown = null
+      let usedCandidate = cmd
+
+      for (const candidate of candidates) {
+        try {
+          const execResult = await execFileAsync(shell, ["-lc", candidate], {
+            cwd: worktreePath,
+            env: commandEnv,
+            timeout: SETUP_COMMAND_TIMEOUT_MS,
+          })
+          stdout = execResult.stdout
+          stderr = execResult.stderr
+          usedCandidate = candidate
+          finalError = null
+          break
+        } catch (error) {
+          finalError = error
+          const shouldTryNext = candidate !== candidates[candidates.length - 1] && isPnpmNotFoundError(error)
+          if (!shouldTryNext) {
+            break
+          }
+        }
+      }
+
+      if (finalError) {
+        throw finalError
+      }
+
+      if (usedCandidate !== cmd) {
+        result.output.push(`[fallback] Executed via: ${usedCandidate}`)
+      }
 
       if (stdout) {
         result.output.push(stdout.trim())
