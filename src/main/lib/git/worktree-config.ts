@@ -1,10 +1,10 @@
 import { readFile, writeFile, mkdir, access } from "node:fs/promises"
 import { join, dirname, isAbsolute } from "node:path"
-import { exec } from "node:child_process"
+import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { getShellEnvironment } from "./shell-env"
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 const SETUP_COMMAND_TIMEOUT_MS = 900_000 // 15 minutes (pnpm install can be slow in large repos)
 
 function formatSetupCommandError(error: unknown, cmd: string): string {
@@ -276,6 +276,7 @@ export async function executeWorktreeSetup(
   })
 
   const shellEnv = await getShellEnvironment()
+  const shell = process.env.SHELL || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash")
   const commandEnv = {
     ...process.env,
     ...shellEnv,
@@ -294,7 +295,7 @@ export async function executeWorktreeSetup(
         currentCommand: cmd,
       })
 
-      const { stdout, stderr } = await execAsync(cmd, {
+      const { stdout, stderr } = await execFileAsync(shell, ["-lc", cmd], {
         cwd: worktreePath,
         env: commandEnv,
         timeout: SETUP_COMMAND_TIMEOUT_MS,
