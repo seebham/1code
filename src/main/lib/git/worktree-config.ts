@@ -6,6 +6,42 @@ import { getShellEnvironment } from "./shell-env"
 
 const execFileAsync = promisify(execFile)
 const SETUP_COMMAND_TIMEOUT_MS = 900_000 // 15 minutes (pnpm install can be slow in large repos)
+const WORKTREE_SETUP_EXEC_VERSION = "esfc-shell-v1"
+
+async function collectShellDiagnostics(
+  shell: string,
+  cwd: string,
+  env: Record<string, string | undefined>,
+): Promise<string[]> {
+  const lines: string[] = []
+  lines.push(`[diag] executor=${WORKTREE_SETUP_EXEC_VERSION}`)
+  lines.push(`[diag] shell=${shell}`)
+  lines.push(`[diag] cwd=${cwd}`)
+  lines.push(`[diag] env.SHELL=${env.SHELL || "<unset>"}`)
+  lines.push(`[diag] env.PATH=${env.PATH || "<unset>"}`)
+
+  try {
+    const { stdout } = await execFileAsync(shell, [
+      "-lc",
+      "command -v pnpm || echo __PNPM_NOT_FOUND__",
+    ], { cwd, env, timeout: 10_000 })
+    lines.push(`[diag] pnpm=${stdout.trim() || "<empty>"}`)
+  } catch (error) {
+    lines.push(`[diag] pnpm-check-failed=${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  try {
+    const { stdout } = await execFileAsync(shell, [
+      "-lc",
+      "command -v corepack || echo __COREPACK_NOT_FOUND__",
+    ], { cwd, env, timeout: 10_000 })
+    lines.push(`[diag] corepack=${stdout.trim() || "<empty>"}`)
+  } catch (error) {
+    lines.push(`[diag] corepack-check-failed=${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  return lines
+}
 
 function formatSetupCommandError(error: unknown, cmd: string): string {
   const lines: string[] = [`Command failed: ${cmd}`]
@@ -282,6 +318,11 @@ export async function executeWorktreeSetup(
     ...shellEnv,
     ROOT_WORKTREE_PATH: mainRepoPath,
   }
+  const setupDiagnostics = await collectShellDiagnostics(shell, worktreePath, commandEnv)
+  for (const line of setupDiagnostics) {
+    console.log(`[worktree-setup] ${line}`)
+    result.output.push(line)
+  }
 
   // Execute each command
   for (const [index, cmd] of runnableCommands.entries()) {
@@ -319,7 +360,10 @@ export async function executeWorktreeSetup(
       })
       console.log(`[worktree-setup] ✓ ${cmd}`)
     } catch (error) {
-      const errorMsg = formatSetupCommandError(error, cmd)
+      let errorMsg = formatSetupCommandError(error, cmd)
+      if (errorMsg.includes("pnpm: command not found")) {
+        errorMsg = `${errorMsg}\n\n${setupDiagnostics.join("\n")}`
+      }
       result.errors.push(errorMsg)
       result.output.push(`[error] ${errorMsg}`)
       options?.onProgress?.({
