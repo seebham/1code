@@ -22,7 +22,7 @@ export const projects = sqliteTable("projects", {
   gitRepo: text("git_repo"),
   // Custom project icon (absolute path to local image file)
   iconPath: text("icon_path"),
-  // Custom worktree base directory; null = default ~/.21st/worktrees
+  // Custom worktree base directory; null = default {projectPath}/.worktrees/
   worktreeBaseDir: text("worktree_base_dir"),
 })
 

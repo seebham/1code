@@ -181,8 +181,7 @@ export const sandboxImportRouter = router({
 			// Create worktree for the chat
 			const worktreeResult = await createWorktreeForChat(
 				project.path,
-				input.projectId,
-				`imported-${Date.now()}`, // Unique ID for worktree directory
+				`imported-${Date.now()}`,
 				undefined,
 				undefined,
 				{ worktreeBaseDir: project.worktreeBaseDir ?? undefined },

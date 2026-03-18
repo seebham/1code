@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
-import { devNull, homedir } from "node:os";
+import { devNull } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import simpleGit from "simple-git";
@@ -908,13 +908,11 @@ export interface CreateWorktreeForChatOptions {
 /**
  * Create a git worktree for a chat (wrapper for chats.ts)
  * @param projectPath - Path to the main repository
- * @param projectSlug - Sanitized project name for worktree directory
  * @param chatId - Chat ID (used for logging)
  * @param selectedBaseBranch - Optional branch to base the worktree off (defaults to auto-detected default branch)
  */
 export async function createWorktreeForChat(
 	projectPath: string,
-	projectSlug: string,
 	chatId: string,
 	selectedBaseBranch?: string,
 	branchType?: "local" | "remote",
@@ -932,10 +930,8 @@ export async function createWorktreeForChat(
 		const baseBranch = selectedBaseBranch || await getDefaultBranch(projectPath);
 
 		const branch = generateBranchName();
-		const customBaseDir = options?.worktreeBaseDir;
-		// Custom base dir: worktrees go directly inside it (no project slug nesting)
-		// Default: ~/.21st/worktrees/{projectSlug}/ (shared across projects, needs slug)
-		const worktreeParentDir = customBaseDir || join(homedir(), ".21st", "worktrees", projectSlug);
+		// Custom base dir if configured, otherwise .claude/worktrees/ inside project (matches Claude Code CLI)
+		const worktreeParentDir = options?.worktreeBaseDir || join(projectPath, ".worktrees");
 		const folderName = generateWorktreeFolderName(worktreeParentDir);
 		const worktreePath = join(worktreeParentDir, folderName);
 

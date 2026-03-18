@@ -17,7 +17,6 @@ import {
   fetchGitHubPRStatus,
   getWorktreeDiff,
   removeWorktree,
-  sanitizeProjectName,
 } from "../../git"
 import type { WorktreeSetupProgress, WorktreeSetupResult } from "../../git/worktree-config"
 import { computeContentHash, gitCache } from "../../git/cache"
@@ -426,7 +425,6 @@ export const chatsRouter = router({
         )
         const result = await createWorktreeForChat(
           project.path,
-          sanitizeProjectName(project.name),
           chat.id,
           input.baseBranch,
           input.branchType,

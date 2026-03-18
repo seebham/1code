@@ -497,7 +497,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
               <div className="flex-1 min-w-0 mr-4">
                 <span className="text-sm font-medium text-foreground">Base Directory</span>
                 <p className="text-sm text-muted-foreground truncate">
-                  {project?.worktreeBaseDir || "Default (~/.21st/worktrees)"}
+                  {project?.worktreeBaseDir || "Default (.worktrees/)"}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
