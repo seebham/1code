@@ -183,6 +183,9 @@ export const sandboxImportRouter = router({
 				project.path,
 				input.projectId,
 				`imported-${Date.now()}`, // Unique ID for worktree directory
+				undefined,
+				undefined,
+				{ worktreeBaseDir: project.worktreeBaseDir ?? undefined },
 			);
 
 			if (!worktreeResult.success || !worktreeResult.worktreePath) {

@@ -121,6 +121,29 @@ function ProjectDetail({ projectId }: { projectId: string }) {
     },
   })
 
+  // Worktree base dir mutations
+  const pickWorktreeBaseDirMutation = trpc.projects.pickWorktreeBaseDir.useMutation({
+    onSuccess: (data) => {
+      if (data) {
+        refetchProject()
+        toast.success("Worktree directory updated")
+      }
+    },
+    onError: (err) => {
+      toast.error(`Failed to set worktree directory: ${err.message}`)
+    },
+  })
+
+  const resetWorktreeBaseDirMutation = trpc.projects.setWorktreeBaseDir.useMutation({
+    onSuccess: () => {
+      refetchProject()
+      toast.success("Worktree directory reset to default")
+    },
+    onError: (err) => {
+      toast.error(`Failed to reset worktree directory: ${err.message}`)
+    },
+  })
+
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
   // Project name editing
@@ -469,8 +492,45 @@ function ProjectDetail({ projectId }: { projectId: string }) {
             </Button>
           </div>
           <div className="bg-background rounded-lg border border-border overflow-hidden">
+            {/* Base directory */}
+            <div className="flex items-center justify-between p-4">
+              <div className="flex-1 min-w-0 mr-4">
+                <span className="text-sm font-medium text-foreground">Base Directory</span>
+                <p className="text-sm text-muted-foreground truncate">
+                  {project?.worktreeBaseDir || "Default (~/.21st/worktrees)"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {project?.worktreeBaseDir && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      resetWorktreeBaseDirMutation.mutate({ id: projectId, worktreeBaseDir: null })
+                    }}
+                    disabled={resetWorktreeBaseDirMutation.isPending}
+                  >
+                    Reset
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    pickWorktreeBaseDirMutation.mutate({ id: projectId })
+                  }}
+                  disabled={pickWorktreeBaseDirMutation.isPending}
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  Browse
+                </Button>
+              </div>
+            </div>
+
             {/* Setup commands */}
-            <div className="p-4 space-y-3">
+            <div className="p-4 border-t border-border space-y-3">
               <div>
                 <span className="text-sm font-medium text-foreground">Setup Commands</span>
                 <p className="text-sm text-muted-foreground">

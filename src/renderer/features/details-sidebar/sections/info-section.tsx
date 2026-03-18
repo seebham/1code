@@ -171,7 +171,7 @@ export const InfoSection = memo(function InfoSection({
     }
   }
 
-  const isWorktree = !!worktreePath && worktreePath.includes(".21st/worktrees")
+  const isWorktree = !!worktreePath
   const openInEditorHotkey = useResolvedHotkeyDisplay("open-in-editor")
 
   const handleOpenInEditor = useCallback(() => {

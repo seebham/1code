@@ -546,4 +546,59 @@ export const projectsRouter = router({
         .returning()
         .get()
     }),
+
+  /**
+   * Pick a custom worktree base directory via native folder picker and save it
+   */
+  pickWorktreeBaseDir: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input }) => {
+      const window = BrowserWindow.getFocusedWindow()
+      if (!window) return null
+
+      if (!window.isFocused()) {
+        window.focus()
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+
+      const result = await dialog.showOpenDialog(window, {
+        properties: ["openDirectory", "createDirectory"],
+        title: "Select Worktree Directory",
+        buttonLabel: "Select",
+      })
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null
+      }
+
+      const selectedPath = result.filePaths[0]!
+      const db = getDatabase()
+
+      const updated = db
+        .update(projects)
+        .set({ worktreeBaseDir: selectedPath, updatedAt: new Date() })
+        .where(eq(projects.id, input.id))
+        .returning()
+        .get()
+
+      return { path: selectedPath, project: updated }
+    }),
+
+  /**
+   * Set or clear custom worktree base directory
+   */
+  setWorktreeBaseDir: publicProcedure
+    .input(z.object({
+      id: z.string(),
+      worktreeBaseDir: z.string().nullable(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = getDatabase()
+      return db
+        .update(projects)
+        .set({ worktreeBaseDir: input.worktreeBaseDir, updatedAt: new Date() })
+        .where(eq(projects.id, input.id))
+        .returning()
+        .get()
+    }),
 })

@@ -158,12 +158,17 @@ function countLines(text: string): number {
  * Convert absolute file path to relative path from project root.
  * Falls back to basename if project path doesn't match.
  */
-function toRelativePath(filePath: string, projectPath?: string): string {
+function toRelativePath(filePath: string, projectPath?: string, worktreePath?: string): string {
+  // Strip worktree path prefix (handles custom worktree base dirs)
+  if (worktreePath && filePath.startsWith(worktreePath)) {
+    const relative = filePath.slice(worktreePath.length)
+    return relative.startsWith("/") ? relative.slice(1) : relative
+  }
   if (projectPath && filePath.startsWith(projectPath)) {
     const relative = filePath.slice(projectPath.length)
     return relative.startsWith("/") ? relative.slice(1) : relative
   }
-  // Handle worktree paths: /Users/.../.21st/worktrees/{chatId}/{subChatId}/relativePath
+  // Fallback: handle default worktree paths from older messages
   const worktreeMatch = filePath.match(/\.21st\/worktrees\/[^/]+\/[^/]+\/(.+)$/)
   if (worktreeMatch) {
     return worktreeMatch[1]!
@@ -176,7 +181,7 @@ function toRelativePath(filePath: string, projectPath?: string): string {
  * Tracks additions and deletions per file.
  * @param projectPath - project root path for computing relative display paths
  */
-export function extractChangedFiles(parts: any[], projectPath?: string): ChangedFileInfo[] {
+export function extractChangedFiles(parts: any[], projectPath?: string, worktreePath?: string): ChangedFileInfo[] {
   const fileMap = new Map<string, ChangedFileInfo>()
 
   for (const part of parts) {
@@ -188,7 +193,7 @@ export function extractChangedFiles(parts: any[], projectPath?: string): Changed
     if (filePath.includes("claude-sessions") || filePath.includes("Application Support")) continue
 
     // Use relative path as display, full path as key
-    const displayPath = toRelativePath(filePath, projectPath)
+    const displayPath = toRelativePath(filePath, projectPath, worktreePath)
 
     const existing = fileMap.get(filePath)
 

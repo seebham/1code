@@ -231,6 +231,27 @@ export function resolveProjectPathFromWorktree(
   const normalizedMarker = worktreeMarker.replace(/\\/g, "/")
 
   if (!normalizedPath.includes(normalizedMarker)) {
+    // Not a default worktree path — check if it's a custom-location worktree
+    try {
+      const db = getDatabase()
+      const chatByWorktree = db
+        .select({ projectId: chats.projectId })
+        .from(chats)
+        .where(eq(chats.worktreePath, pathToResolve))
+        .get()
+
+      if (chatByWorktree) {
+        const project = db
+          .select({ path: projects.path })
+          .from(projects)
+          .where(eq(projects.id, chatByWorktree.projectId))
+          .get()
+        if (project) return project.path
+      }
+    } catch (error) {
+      console.error("[worktree-utils] Failed to resolve custom worktree path:", error)
+    }
+
     // Not a worktree path, return as-is
     return pathToResolve
   }

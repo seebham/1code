@@ -902,6 +902,7 @@ export interface WorktreeResult {
 export interface CreateWorktreeForChatOptions {
 	onSetupComplete?: (result: WorktreeSetupResult) => void;
 	onSetupProgress?: (progress: WorktreeSetupProgress) => void;
+	worktreeBaseDir?: string;
 }
 
 /**
@@ -931,10 +932,12 @@ export async function createWorktreeForChat(
 		const baseBranch = selectedBaseBranch || await getDefaultBranch(projectPath);
 
 		const branch = generateBranchName();
-		const worktreesDir = join(homedir(), ".21st", "worktrees");
-		const projectWorktreeDir = join(worktreesDir, projectSlug);
-		const folderName = generateWorktreeFolderName(projectWorktreeDir);
-		const worktreePath = join(projectWorktreeDir, folderName);
+		const customBaseDir = options?.worktreeBaseDir;
+		// Custom base dir: worktrees go directly inside it (no project slug nesting)
+		// Default: ~/.21st/worktrees/{projectSlug}/ (shared across projects, needs slug)
+		const worktreeParentDir = customBaseDir || join(homedir(), ".21st", "worktrees", projectSlug);
+		const folderName = generateWorktreeFolderName(worktreeParentDir);
+		const worktreePath = join(worktreeParentDir, folderName);
 
 		// Determine startPoint based on branch type
 		// For local branches, use the local ref directly

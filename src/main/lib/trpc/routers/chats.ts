@@ -431,6 +431,7 @@ export const chatsRouter = router({
           input.baseBranch,
           input.branchType,
           {
+            worktreeBaseDir: project.worktreeBaseDir ?? undefined,
             onSetupProgress: (progress) => {
               sendWorktreeSetupProgress(requestingWindowId, {
                 projectId: project.id,

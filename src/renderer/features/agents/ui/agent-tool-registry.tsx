@@ -54,8 +54,14 @@ export function getToolStatus(part: any, chatStatus?: string) {
 
 // Utility to get clean display path (remove sandbox/worktree/absolute prefixes)
 // projectPath: optional absolute path to the project root, used to compute relative paths
-export function getDisplayPath(filePath: string, projectPath?: string): string {
+export function getDisplayPath(filePath: string, projectPath?: string, worktreePath?: string): string {
   if (!filePath) return ""
+
+  // Strip worktree path prefix (handles custom worktree base dirs)
+  if (worktreePath && filePath.startsWith(worktreePath)) {
+    const relative = filePath.slice(worktreePath.length).replace(/^\//, "")
+    return relative || filePath.split("/").pop() || filePath
+  }
 
   // If projectPath is provided, strip it to get a project-relative path
   if (projectPath && filePath.startsWith(projectPath)) {
