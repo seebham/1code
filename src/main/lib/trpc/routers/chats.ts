@@ -1916,24 +1916,35 @@ export const chatsRouter = router({
         .where(eq(chats.id, input.chatId))
         .get()
 
-      // No worktree if no branch (local mode)
-      if (!chat?.worktreePath || !chat?.branch) {
+      // No worktree if no path stored
+      if (!chat?.worktreePath) {
         return { hasWorktree: false, uncommittedCount: 0 }
       }
 
+      // Check if the worktree directory exists on disk
+      let dirExists = false
+      try {
+        const stat = await fs.stat(chat.worktreePath)
+        dirExists = stat.isDirectory()
+      } catch {
+        // Directory doesn't exist
+      }
+
+      if (!dirExists) {
+        return { hasWorktree: false, uncommittedCount: 0 }
+      }
+
+      // Directory exists — try to get uncommitted changes count
+      let uncommittedCount = 0
       try {
         const git = simpleGit(chat.worktreePath)
         const status = await git.status()
-
-        return {
-          hasWorktree: true,
-          uncommittedCount: status.files.length,
-        }
+        uncommittedCount = status.files.length
       } catch (error) {
-        // Worktree path doesn't exist or git error
-        console.warn("[getWorktreeStatus] Error checking worktree:", error)
-        return { hasWorktree: false, uncommittedCount: 0 }
+        console.warn("[getWorktreeStatus] Git status failed, but worktree dir exists:", error)
       }
+
+      return { hasWorktree: true, uncommittedCount }
     }),
 
   /**
