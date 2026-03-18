@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { cn } from "../../../lib/utils"
+import { isMacOS } from "../../../lib/utils/platform"
 
 /**
  * Invisible no-drag zone over native macOS traffic lights.
@@ -17,7 +18,7 @@ export function TrafficLights({
   isDesktop?: boolean
   className?: string
 }) {
-  if (!isDesktop || isFullscreen === true) return null
+  if (!isDesktop || !isMacOS() || isFullscreen === true) return null
 
   return (
     <div
@@ -70,7 +71,7 @@ export function TrafficLightSpacer({
     prevFullscreenRef.current = isFullscreen
   }, [isFullscreen])
 
-  const shouldShow = isDesktop && isFullscreen !== true
+  const shouldShow = isDesktop && isMacOS() && isFullscreen !== true
 
   return (
     <div
