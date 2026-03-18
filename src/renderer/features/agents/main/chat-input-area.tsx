@@ -70,6 +70,7 @@ import { useAgentSubChatStore } from "../stores/sub-chat-store"
 import { AgentsSlashCommand, type SlashCommandOption } from "../commands"
 import { AgentModelSelector } from "../components/agent-model-selector"
 import { AgentSendButton } from "../components/agent-send-button"
+import { HandyVoiceButton } from "../components/handy-voice-button"
 import type { UploadedFile, UploadedImage } from "../hooks/use-agents-file-upload"
 import {
   clearSubChatDraft,
@@ -105,6 +106,7 @@ import {
 import { getResolvedHotkey } from "../../../lib/hotkeys"
 import { customHotkeysAtom } from "../../../lib/atoms"
 import { toast } from "sonner"
+import { useHandyVoice } from "../../../lib/hooks/use-handy-voice"
 
 // Hook to get available models (including offline models if Ollama is available and debug enabled)
 function useAvailableModels() {
@@ -726,6 +728,22 @@ export const ChatInputArea = memo(function ChatInputArea({
   // Check if voice input is available (authenticated OR has OPENAI_API_KEY)
   const { data: voiceAvailability } = trpc.voice.isAvailable.useQuery()
   const isVoiceAvailable = voiceAvailability?.available ?? false
+
+  // Handy voice input
+  const { isInstalled: isHandyInstalled, isListening: isHandyListening, startListening: startHandyListening, stopListening: stopHandyListening } = useHandyVoice()
+
+  const handleHandyClick = useCallback(() => {
+    if (isHandyListening) {
+      stopHandyListening()
+      return
+    }
+    startHandyListening((text) => {
+      const current = (editorRef.current?.getValue() || "").trim()
+      const needsSpace = current.length > 0 && !/\s$/.test(current)
+      editorRef.current?.setValue(current + (needsSpace ? " " : "") + text)
+      editorRef.current?.focus()
+    })
+  }, [isHandyListening, stopHandyListening, startHandyListening, editorRef])
 
   // Get resolved voice input hotkey
   const customHotkeys = useAtomValue(customHotkeysAtom)
@@ -1655,6 +1673,15 @@ export const ChatInputArea = memo(function ChatInputArea({
                         <AttachIcon className="h-4 w-4" />
                       </Button>
                     </>
+                  )}
+
+                  {/* Handy voice input button */}
+                  {isHandyInstalled && (
+                    <HandyVoiceButton
+                      isListening={isHandyListening}
+                      onClick={handleHandyClick}
+                      disabled={isStreaming || isVoiceRecording || isTranscribing}
+                    />
                   )}
 
                   {/* Send/Stop/Voice button */}

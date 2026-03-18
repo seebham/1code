@@ -86,6 +86,7 @@ import {
   getAudioFormat,
 } from "../../../lib/hooks/use-voice-recording"
 import { getResolvedHotkey } from "../../../lib/hotkeys"
+import { useHandyVoice } from "../../../lib/hooks/use-handy-voice"
 import {
   AgentsFileMention,
   AgentsMentionsEditor,
@@ -106,6 +107,7 @@ import {
 } from "../../../components/ui/prompt-input"
 import { agentsSidebarOpenAtom, agentsUnseenChangesAtom } from "../atoms"
 import { AgentSendButton } from "../components/agent-send-button"
+import { HandyVoiceButton } from "../components/handy-voice-button"
 import { AgentModelSelector } from "../components/agent-model-selector"
 import { CreateBranchDialog } from "../components/create-branch-dialog"
 import { formatTimeAgo } from "../utils/format-time-ago"
@@ -557,6 +559,23 @@ export function NewChatForm({
   // Check if voice input is available (authenticated OR has OPENAI_API_KEY)
   const { data: voiceAvailability } = trpc.voice.isAvailable.useQuery()
   const isVoiceAvailable = voiceAvailability?.available ?? false
+
+  // Handy voice input
+  const { isInstalled: isHandyInstalled, isListening: isHandyListening, startListening: startHandyListening, stopListening: stopHandyListening } = useHandyVoice()
+
+  const handleHandyClick = useCallback(() => {
+    if (isHandyListening) {
+      stopHandyListening()
+      return
+    }
+    startHandyListening((text) => {
+      const current = (editorRef.current?.getValue() || "").trim()
+      const needsSpace = current.length > 0 && !/\s$/.test(current)
+      editorRef.current?.setValue(current + (needsSpace ? " " : "") + text)
+      editorRef.current?.focus()
+      setHasContent(true)
+    })
+  }, [isHandyListening, stopHandyListening, startHandyListening, editorRef])
 
   // Voice input handlers
   const handleVoiceMouseDown = useCallback(async () => {
@@ -1959,6 +1978,14 @@ export function NewChatForm({
                         >
                           <AttachIcon className="h-4 w-4" />
                         </Button>
+                      )}
+                      {/* Handy voice input button */}
+                      {isHandyInstalled && (
+                        <HandyVoiceButton
+                          isListening={isHandyListening}
+                          onClick={handleHandyClick}
+                          disabled={isVoiceRecording || isTranscribing || isUploading}
+                        />
                       )}
                       <div className="ml-1">
                         <AgentSendButton
