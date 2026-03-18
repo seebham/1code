@@ -153,10 +153,8 @@ export function UpdateBanner() {
     }
   }
 
-  // For open source builds (!isPackaged), hide all update banners
-  if (!isPackaged) {
-    return null
-  }
+  // Hide all update banners - using forked version, no upstream updates
+  return null
 
   // Show "What's New" banner if app was just updated
   if (justUpdated) {
