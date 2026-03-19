@@ -3,9 +3,8 @@ import { toast } from "sonner"
 import { trpc } from "../trpc"
 
 const POLL_INTERVAL_MS = 500
-const TIMEOUT_MS = 60_000
 // After stopping Handy, wait up to 10s for the transcription to appear in DB
-const STOP_WAIT_MS = 10_000
+const STOP_WAIT_MS = 30_000
 
 export function useHandyVoice() {
   const [isListening, setIsListening] = useState(false)
@@ -65,14 +64,8 @@ export function useHandyVoice() {
       setIsListening(true)
 
       startPolling()
-
-      // Timeout after 60s
-      timeoutRef.current = setTimeout(() => {
-        cleanup()
-        toast.info("Handy voice input timed out")
-      }, TIMEOUT_MS)
     },
-    [isListening, toggleMutation, startPolling, cleanup]
+    [isListening, toggleMutation, startPolling]
   )
 
   const stopListening = useCallback(async () => {
@@ -85,8 +78,7 @@ export function useHandyVoice() {
       // Ignore toggle-off errors
     }
 
-    // Replace the 60s timeout with a shorter one — give Handy time to write to DB
-    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    // Give Handy time to transcribe and write to DB
     timeoutRef.current = setTimeout(() => {
       cleanup()
       toast.info("No transcription received from Handy")
