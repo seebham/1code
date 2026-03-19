@@ -1152,6 +1152,7 @@ export function NewChatForm({
           if (cmd) {
             const { content } = await trpcUtils.commands.getContent.fetch({
               path: cmd.path,
+              projectPath: validatedProject?.path,
             })
             // Replace $ARGUMENTS with the provided args
             message = content.replace(/\$ARGUMENTS/g, args.trim())

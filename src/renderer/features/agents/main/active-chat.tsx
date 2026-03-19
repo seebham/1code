@@ -3908,6 +3908,7 @@ const ChatViewInner = memo(function ChatViewInner({
           if (cmd) {
             const { content } = await trpcClient.commands.getContent.query({
               path: cmd.path,
+              projectPath,
             })
             finalText = content.replace(/\$ARGUMENTS/g, args.trim())
           }
@@ -4229,6 +4230,7 @@ const ChatViewInner = memo(function ChatViewInner({
           if (cmd) {
             const { content } = await trpcClient.commands.getContent.query({
               path: cmd.path,
+              projectPath,
             })
             finalText = content.replace(/\$ARGUMENTS/g, args.trim())
           }
