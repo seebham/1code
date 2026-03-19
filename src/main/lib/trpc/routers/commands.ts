@@ -132,6 +132,69 @@ async function scanCommandsDirectory(
 }
 
 /**
+ * Scan .claude/skills/ directory for SKILL.md files
+ * Each skill is a subdirectory containing a SKILL.md file with frontmatter (name, description)
+ */
+async function scanSkillsDirectory(
+  dir: string,
+  source: "user" | "project",
+  basePath?: string,
+): Promise<FileCommand[]> {
+  const commands: FileCommand[] = []
+
+  try {
+    try {
+      await fs.access(dir)
+    } catch {
+      return commands
+    }
+
+    const entries = await fs.readdir(dir, { withFileTypes: true })
+
+    for (const entry of entries) {
+      if (!isValidEntryName(entry.name)) continue
+
+      const fullPath = path.join(dir, entry.name)
+      const { isDirectory } = await resolveDirentType(dir, entry)
+      if (!isDirectory) continue
+
+      const skillMdPath = path.join(fullPath, "SKILL.md")
+      try {
+        const rawContent = await fs.readFile(skillMdPath, "utf-8")
+        const parsed = parseCommandMd(rawContent)
+        const { content: body } = matter(rawContent)
+        const commandName = parsed.name || entry.name
+
+        let displayPath: string
+        if (source === "project" && basePath) {
+          displayPath = path.relative(basePath, skillMdPath)
+        } else {
+          const homeDir = os.homedir()
+          displayPath = skillMdPath.startsWith(homeDir)
+            ? "~" + skillMdPath.slice(homeDir.length)
+            : skillMdPath
+        }
+
+        commands.push({
+          name: commandName,
+          description: parsed.description || "",
+          argumentHint: parsed.argumentHint,
+          source,
+          path: displayPath,
+          content: body.trim(),
+        })
+      } catch {
+        // No SKILL.md in this directory, skip
+      }
+    }
+  } catch (err) {
+    console.error(`[commands] Failed to scan skills directory ${dir}:`, err)
+  }
+
+  return commands
+}
+
+/**
  * Generate command .md content from name, description, and body
  */
 function generateCommandMd(command: { name: string; description: string; content: string; argumentHint?: string }): string {
@@ -164,8 +227,7 @@ function resolveCommandPath(displayPath: string, projectPath?: string): string {
 export const commandsRouter = router({
   /**
    * List all commands from filesystem
-   * - User commands: ~/.claude/commands/
-   * - Project commands: .claude/commands/ (relative to projectPath)
+   * Scans both legacy .claude/commands/ and .claude/skills/ directories
    */
   list: publicProcedure
     .input(
@@ -176,20 +238,23 @@ export const commandsRouter = router({
         .optional(),
     )
     .query(async ({ input }) => {
-      const userCommandsDir = path.join(os.homedir(), ".claude", "commands")
-      const userCommandsPromise = scanCommandsDirectory(userCommandsDir, "user")
+      const claudeHome = path.join(os.homedir(), ".claude")
+      const userCommandsPromise = scanCommandsDirectory(path.join(claudeHome, "commands"), "user")
+      const userSkillsPromise = scanSkillsDirectory(path.join(claudeHome, "skills"), "user")
 
       let projectCommandsPromise = Promise.resolve<FileCommand[]>([])
+      let projectSkillsPromise = Promise.resolve<FileCommand[]>([])
       if (input?.projectPath) {
-        const projectCommandsDir = path.join(
-          input.projectPath,
-          ".claude",
-          "commands",
-        )
+        const projectClaude = path.join(input.projectPath, ".claude")
         projectCommandsPromise = scanCommandsDirectory(
-          projectCommandsDir,
+          path.join(projectClaude, "commands"),
           "project",
           "",
+          input.projectPath,
+        )
+        projectSkillsPromise = scanSkillsDirectory(
+          path.join(projectClaude, "skills"),
+          "project",
           input.projectPath,
         )
       }
@@ -213,16 +278,27 @@ export const commandsRouter = router({
       })
 
       // Scan all directories in parallel
-      const [userCommands, projectCommands, ...pluginCommandsArrays] =
+      const [userCommands, userSkills, projectCommands, projectSkills, ...pluginCommandsArrays] =
         await Promise.all([
           userCommandsPromise,
+          userSkillsPromise,
           projectCommandsPromise,
+          projectSkillsPromise,
           ...pluginCommandsPromises,
         ])
       const pluginCommands = pluginCommandsArrays.flat()
 
-      // Project commands first (more specific), then user commands, then plugin commands
-      return [...projectCommands, ...userCommands, ...pluginCommands]
+      // Dedupe: if same name exists in both commands/ and skills/, prefer skills/ (newer format)
+      const seen = new Set<string>()
+      const deduped: FileCommand[] = []
+      for (const cmd of [...projectSkills, ...projectCommands, ...userSkills, ...userCommands, ...pluginCommands]) {
+        if (!seen.has(cmd.name)) {
+          seen.add(cmd.name)
+          deduped.push(cmd)
+        }
+      }
+
+      return deduped
     }),
 
   /**
