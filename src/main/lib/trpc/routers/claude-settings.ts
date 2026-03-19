@@ -57,7 +57,11 @@ export async function getEnabledPlugins(): Promise<string[]> {
   }
 
   const settings = await readClaudeSettings()
-  const plugins = Array.isArray(settings.enabledPlugins) ? settings.enabledPlugins as string[] : []
+  const ep = settings.enabledPlugins
+  // Handle both record format (correct) and legacy array format
+  const plugins = ep && typeof ep === "object" && !Array.isArray(ep)
+    ? Object.entries(ep as Record<string, boolean>).filter(([, v]) => v).map(([k]) => k)
+    : Array.isArray(ep) ? (ep as string[]) : []
 
   enabledPluginsCache = { plugins, timestamp: Date.now() }
   return plugins
@@ -156,15 +160,18 @@ export const claudeSettingsRouter = router({
     )
     .mutation(async ({ input }) => {
       const settings = await readClaudeSettings()
-      const enabledPlugins = Array.isArray(settings.enabledPlugins)
-        ? (settings.enabledPlugins as string[])
-        : []
+      const ep = settings.enabledPlugins
+      // Read existing as record, migrating from legacy array format if needed
+      const enabledPlugins: Record<string, boolean> = ep && typeof ep === "object" && !Array.isArray(ep)
+        ? { ...(ep as Record<string, boolean>) }
+        : Array.isArray(ep)
+          ? Object.fromEntries((ep as string[]).map((k) => [k, true]))
+          : {}
 
-      if (input.enabled && !enabledPlugins.includes(input.pluginSource)) {
-        enabledPlugins.push(input.pluginSource)
-      } else if (!input.enabled) {
-        const index = enabledPlugins.indexOf(input.pluginSource)
-        if (index > -1) enabledPlugins.splice(index, 1)
+      if (input.enabled) {
+        enabledPlugins[input.pluginSource] = true
+      } else {
+        delete enabledPlugins[input.pluginSource]
       }
 
       settings.enabledPlugins = enabledPlugins
