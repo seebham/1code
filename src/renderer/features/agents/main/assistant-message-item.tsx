@@ -766,6 +766,7 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
             part={part}
             chatStatus={status}
             subChatId={subChatId}
+            chatId={chatId}
             isEdit={part.type === "tool-Edit"}
           />
         )
@@ -934,6 +935,7 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
             part={lastCollapsedPlanOp.part}
             chatStatus={status}
             subChatId={subChatId}
+            chatId={chatId}
             isEdit={lastCollapsedPlanOp.type === "edit"}
           />
         )}

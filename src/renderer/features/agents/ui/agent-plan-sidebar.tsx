@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAtomValue } from "jotai"
 import { Button } from "../../../components/ui/button"
-import { IconDoubleChevronRight, IconSpinner, PlanIcon, MarkdownIcon, CodeIcon } from "../../../components/ui/icons"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu"
+import { IconChevronDown, IconDoubleChevronRight, IconSpinner, PlanIcon, MarkdownIcon, CodeIcon } from "../../../components/ui/icons"
 import { Kbd } from "../../../components/ui/kbd"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip"
 import { ChatMarkdownRenderer } from "../../../components/chat-markdown-renderer"
@@ -17,6 +23,7 @@ interface AgentPlanSidebarProps {
   planPath: string | null
   onClose: () => void
   onBuildPlan?: () => void
+  onBuildPlanNewChat?: (planContent: string) => void
   /** Timestamp that triggers refetch when changed (e.g., after plan Edit completes) */
   refetchTrigger?: number
   /** Current agent mode (plan or agent) */
@@ -28,6 +35,7 @@ export function AgentPlanSidebar({
   planPath,
   onClose,
   onBuildPlan,
+  onBuildPlanNewChat,
   refetchTrigger,
   mode = "agent",
 }: AgentPlanSidebarProps) {
@@ -123,16 +131,35 @@ export function AgentPlanSidebar({
             </Tooltip>
           )}
 
-          {/* Approve Plan button - only show in plan mode */}
-          {mode === "plan" && onBuildPlan && (
-            <Button
-              size="sm"
-              className="h-6 px-3 text-xs font-medium rounded-md transition-transform duration-150 active:scale-[0.97]"
-              onClick={onBuildPlan}
-            >
-              Approve
-              <Kbd className="ml-1.5 text-primary-foreground/70">⌘↵</Kbd>
-            </Button>
+          {/* Implement Plan buttons - only show in plan mode */}
+          {mode === "plan" && (onBuildPlanNewChat || onBuildPlan) && (
+            <div className="flex items-center">
+              <Button
+                size="sm"
+                className="h-6 px-3 text-xs font-medium rounded-r-none rounded-l-md transition-transform duration-150 active:scale-[0.97]"
+                onClick={() => onBuildPlanNewChat?.(planContent || "")}
+              >
+                Implement
+                <Kbd className="ml-1.5 text-primary-foreground/70">⌘↵</Kbd>
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    className="h-6 px-1 text-xs font-medium rounded-l-none rounded-r-md border-l border-primary-foreground/20 transition-transform duration-150 active:scale-[0.97]"
+                  >
+                    <IconChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" side="bottom">
+                  {onBuildPlan && (
+                    <DropdownMenuItem onClick={onBuildPlan}>
+                      Implement here
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           )}
         </div>
       </div>

@@ -126,6 +126,8 @@ import {
   MODEL_ID_MAP,
   pendingAuthRetryMessageAtom,
   pendingBuildPlanSubChatIdAtom,
+  pendingBuildPlanNewChatAtom,
+  pendingAutoSendMessageAtom,
   pendingConflictResolutionMessageAtom,
   pendingChatHistoryAtom,
   type PendingChatHistory,
@@ -2682,6 +2684,18 @@ const ChatViewInner = memo(function ChatViewInner({
     }
   }, [pendingConflictMessage, isStreaming, sendMessage, setPendingConflictMessage, subChatId])
 
+  // Watch for pending auto-send message (e.g. after "Implement" creates a new sub-chat)
+  const [pendingAutoSendMessage, setPendingAutoSendMessage] = useAtom(pendingAutoSendMessageAtom)
+  useEffect(() => {
+    if (pendingAutoSendMessage?.subChatId === subChatId && !isStreaming) {
+      setPendingAutoSendMessage(null)
+      sendMessage({
+        role: "user",
+        parts: [{ type: "text", text: pendingAutoSendMessage.message }],
+      })
+    }
+  }, [pendingAutoSendMessage, isStreaming, sendMessage, setPendingAutoSendMessage, subChatId])
+
   // Handle pending "Build plan" from sidebar (atom - effect is defined after handleApprovePlan)
   const [pendingBuildPlanSubChatId, setPendingBuildPlanSubChatId] = useAtom(
     pendingBuildPlanSubChatIdAtom,
@@ -3173,6 +3187,88 @@ const ChatViewInner = memo(function ChatViewInner({
       handleApprovePlan()
     }
   }, [pendingBuildPlanSubChatId, subChatId, isActive, setPendingBuildPlanSubChatId, handleApprovePlan])
+
+  // Handle "Implement" (new chat) - extracts plan content from messages and triggers new sub-chat
+  const handleApprovePlanNewChat = useCallback(() => {
+    // Find the latest plan content from assistant messages
+    let planContent = ""
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg.role !== "assistant" || !msg.parts) continue
+      for (const part of msg.parts) {
+        if (isPlanFile(part) && part.input) {
+          const content = (part.input as any).content || (part.input as any).new_string || ""
+          if (content) {
+            planContent = content
+            break
+          }
+        }
+      }
+      if (planContent) break
+    }
+    appStore.set(pendingBuildPlanNewChatAtom, { subChatId, chatId: parentChatId, planContent })
+  }, [messages, subChatId, parentChatId])
+
+  // Handle pending "Implement in new chat" - creates a fresh sub-chat in agent mode
+  const [pendingBuildPlanNewChat, setPendingBuildPlanNewChat] = useAtom(pendingBuildPlanNewChatAtom)
+  useEffect(() => {
+    if (pendingBuildPlanNewChat?.subChatId !== subChatId || !isActive) return
+    const { chatId: targetChatId, planContent } = pendingBuildPlanNewChat
+    setPendingBuildPlanNewChat(null) // Clear immediately
+
+    const run = async () => {
+      const newSubChat = await trpcClient.chats.createSubChat.mutate({
+        chatId: targetChatId,
+        name: "New Chat",
+        mode: "agent",
+      })
+      utils.agents.getAgentChat.invalidate({ chatId: targetChatId })
+
+      // Optimistic update: inject new sub-chat into React Query cache
+      utils.agents.getAgentChat.setData({ chatId: targetChatId }, (old) => {
+        if (!old) return old
+        return {
+          ...old,
+          subChats: [
+            ...(old.subChats || []),
+            {
+              id: newSubChat.id,
+              name: "New Chat",
+              mode: "agent" as const,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              messages: null,
+              stream_id: null,
+            },
+          ],
+        }
+      })
+
+      const store = useAgentSubChatStore.getState()
+      store.addToAllSubChats({
+        id: newSubChat.id,
+        name: "New Chat",
+        created_at: new Date().toISOString(),
+        mode: "agent",
+      })
+      appStore.set(subChatModeAtomFamily(newSubChat.id), "agent" as const)
+
+      // Open and navigate to new sub-chat
+      store.addToOpenSubChats(newSubChat.id)
+      store.setActiveSubChat(newSubChat.id)
+
+      // Queue first message with full plan content (auto-sent once new ChatViewInner mounts)
+      appStore.set(pendingAutoSendMessageAtom, {
+        subChatId: newSubChat.id,
+        message: `Implement plan\n\n${planContent}`,
+      })
+    }
+
+    run().catch((err) => {
+      console.error(err)
+      toast.error("Failed to create new chat for implementation")
+    })
+  }, [pendingBuildPlanNewChat, subChatId, isActive, setPendingBuildPlanNewChat, utils])
 
   // Detect PR URLs in assistant messages and store them
   // Initialize with existing PR URL to prevent duplicate toast on re-mount
@@ -4376,7 +4472,7 @@ const ChatViewInner = memo(function ChatViewInner({
     })
   }, [hasUnapprovedPlan, subChatId, parentChatId, setPendingPlanApprovals])
 
-  // Keyboard shortcut: Cmd+Enter to approve plan
+  // Keyboard shortcut: Cmd+Enter to implement plan in new chat (default action)
   useEffect(() => {
     if (!isActive) return
 
@@ -4389,13 +4485,13 @@ const ChatViewInner = memo(function ChatViewInner({
         !isStreaming
       ) {
         e.preventDefault()
-        handleApprovePlan()
+        handleApprovePlanNewChat()
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isActive, hasUnapprovedPlan, isStreaming, handleApprovePlan])
+  }, [isActive, hasUnapprovedPlan, isStreaming, handleApprovePlanNewChat])
 
   // Cmd/Ctrl + Arrow Down to scroll to bottom (works even when focused in input)
   // But don't intercept if input has content - let native cursor navigation work
@@ -4955,7 +5051,7 @@ export function ChatView({
   )
   const planEditRefetchTrigger = useAtomValue(planEditRefetchTriggerAtom)
 
-  // Handler for plan sidebar "Build plan" button
+  // Handler for plan sidebar "Build plan" button (implement here - same sub-chat)
   // Uses getState() to get fresh activeSubChatId (avoids stale closure)
   const handleApprovePlanFromSidebar = useCallback(() => {
     const activeSubChatId = useAgentSubChatStore.getState().activeSubChatId
@@ -4963,6 +5059,14 @@ export function ChatView({
       setPendingBuildPlanSubChatId(activeSubChatId)
     }
   }, [setPendingBuildPlanSubChatId])
+
+  // Handler for plan sidebar "Implement" button (new sub-chat)
+  const handleApprovePlanNewChatFromSidebar = useCallback((planContent: string) => {
+    const activeSubChatId = useAgentSubChatStore.getState().activeSubChatId
+    if (activeSubChatId) {
+      appStore.set(pendingBuildPlanNewChatAtom, { subChatId: activeSubChatId, chatId, planContent })
+    }
+  }, [chatId])
 
   // Per-chat terminal sidebar state - each chat remembers its own open/close state
   const terminalSidebarAtom = useMemo(
@@ -7925,6 +8029,7 @@ Make sure to preserve all functionality from both branches when resolving confli
               planPath={currentPlanPath}
               onClose={() => setIsPlanSidebarOpen(false)}
               onBuildPlan={handleApprovePlanFromSidebar}
+              onBuildPlanNewChat={handleApprovePlanNewChatFromSidebar}
               refetchTrigger={planEditRefetchTrigger}
               mode={currentMode}
             />
@@ -8140,6 +8245,7 @@ Make sure to preserve all functionality from both branches when resolving confli
             planPath={currentPlanPath}
             mode={currentMode}
             onBuildPlan={handleApprovePlanFromSidebar}
+            onBuildPlanNewChat={handleApprovePlanNewChatFromSidebar}
             planRefetchTrigger={planEditRefetchTrigger}
             activeSubChatId={activeSubChatIdForPlan}
             isPlanSidebarOpen={isPlanSidebarOpen && !!currentPlanPath}

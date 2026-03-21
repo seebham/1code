@@ -834,6 +834,16 @@ export const pendingPlanApprovalsAtom = atom<Map<string, string>>(new Map())
 // Contains subChatId to approve, null when no pending approval
 export const pendingBuildPlanSubChatIdAtom = atom<string | null>(null)
 
+// Pending "Implement in new chat" trigger - carries plan content for new sub-chat
+export const pendingBuildPlanNewChatAtom = atom<{
+  subChatId: string
+  chatId: string
+  planContent: string
+} | null>(null)
+
+// Pending auto-send message for a specific sub-chat (e.g. after "Implement" creates a new sub-chat)
+export const pendingAutoSendMessageAtom = atom<{ message: string; subChatId: string } | null>(null)
+
 // Store AskUserQuestion results by toolUseId for real-time updates
 // Map<toolUseId, result>
 export const askUserQuestionResultsAtom = atom<Map<string, unknown>>(new Map())

@@ -3,9 +3,15 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef } from "react"
 import { useAtom } from "jotai"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Kbd } from "@/components/ui/kbd"
 import { cn } from "@/lib/utils"
-import { PlanIcon, ExpandIcon, CollapseIcon, IconSpinner } from "@/components/ui/icons"
+import { PlanIcon, ExpandIcon, CollapseIcon, IconChevronDown, IconSpinner } from "@/components/ui/icons"
 import { ChatMarkdownRenderer } from "@/components/chat-markdown-renderer"
 import { trpc } from "@/lib/trpc"
 import { planContentCacheAtomFamily } from "../atoms"
@@ -22,8 +28,10 @@ interface PlanWidgetProps {
   refetchTrigger?: number
   /** Current agent mode (plan or agent) */
   mode?: AgentMode
-  /** Callback when "Approve" is clicked */
+  /** Callback when "Approve" (implement here) is clicked */
   onApprovePlan?: () => void
+  /** Callback when "Implement" (new chat) is clicked */
+  onApprovePlanNewChat?: (planContent: string) => void
   /** Callback when "View plan" is clicked - opens plan sidebar */
   onExpandPlan?: () => void
 }
@@ -41,6 +49,7 @@ export const PlanWidget = memo(function PlanWidget({
   refetchTrigger,
   mode = "agent",
   onApprovePlan,
+  onApprovePlanNewChat,
   onExpandPlan,
 }: PlanWidgetProps) {
   // Use activeSubChatId for fetching if available
@@ -157,18 +166,38 @@ export const PlanWidget = memo(function PlanWidget({
             >
               View plan
             </Button>
-            {mode === "plan" && onApprovePlan && (
-              <Button
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onApprovePlan()
-                }}
-                className="h-5 px-2 mx-0.5 text-[10px] font-medium rounded transition-transform duration-150 active:scale-[0.97]"
-              >
-                Approve
-                <Kbd className="ml-1 text-primary-foreground/70">⌘↵</Kbd>
-              </Button>
+            {mode === "plan" && (onApprovePlanNewChat || onApprovePlan) && (
+              <div className="flex items-center mx-0.5">
+                <Button
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onApprovePlanNewChat?.(displayContent || "")
+                  }}
+                  className="h-5 px-2 text-[10px] font-medium rounded-r-none rounded-l transition-transform duration-150 active:scale-[0.97]"
+                >
+                  Implement
+                  <Kbd className="ml-1 text-primary-foreground/70">⌘↵</Kbd>
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-5 px-1 text-[10px] font-medium rounded-l-none rounded-r border-l border-primary-foreground/20 transition-transform duration-150 active:scale-[0.97]"
+                    >
+                      <IconChevronDown className="h-2.5 w-2.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" side="bottom">
+                    {onApprovePlan && (
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onApprovePlan() }}>
+                        Implement here
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             )}
 
             {/* Expand/Collapse button */}

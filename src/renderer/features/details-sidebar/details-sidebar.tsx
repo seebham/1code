@@ -152,8 +152,10 @@ interface DetailsSidebarProps {
   planPath: string | null
   /** Current agent mode (plan or agent) */
   mode: AgentMode
-  /** Callback when "Build plan" is clicked */
+  /** Callback when "Build plan" (implement here) is clicked */
   onBuildPlan?: () => void
+  /** Callback when "Implement" (new chat) is clicked */
+  onBuildPlanNewChat?: (planContent: string) => void
   /** Plan refetch trigger */
   planRefetchTrigger?: number
   /** Active sub-chat ID for plan */
@@ -206,6 +208,7 @@ export function DetailsSidebar({
   planPath,
   mode,
   onBuildPlan,
+  onBuildPlanNewChat,
   planRefetchTrigger,
   activeSubChatId,
   isPlanSidebarOpen,
@@ -450,6 +453,7 @@ export function DetailsSidebar({
                     refetchTrigger={planRefetchTrigger}
                     mode={mode}
                     onApprovePlan={onBuildPlan}
+                    onApprovePlanNewChat={onBuildPlanNewChat}
                     onExpandPlan={onExpandPlan}
                   />
                 )

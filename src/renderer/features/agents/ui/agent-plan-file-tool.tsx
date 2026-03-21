@@ -4,13 +4,20 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChatMarkdownRenderer } from "../../../components/chat-markdown-renderer"
 import { Button } from "../../../components/ui/button"
-import { CheckIcon, CollapseIcon, CopyIcon, ExpandIcon, PlanIcon } from "../../../components/ui/icons"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu"
+import { CheckIcon, CollapseIcon, CopyIcon, ExpandIcon, IconChevronDown, IconSpinner, PlanIcon } from "../../../components/ui/icons"
 import { Kbd } from "../../../components/ui/kbd"
 import { TextShimmer } from "../../../components/ui/text-shimmer"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip"
 import { cn } from "../../../lib/utils"
 import {
   currentPlanPathAtomFamily,
+  pendingBuildPlanNewChatAtom,
   pendingBuildPlanSubChatIdAtom,
   planSidebarOpenAtomFamily,
   subChatModeAtomFamily,
@@ -31,6 +38,7 @@ interface AgentPlanFileToolProps {
   }
   chatStatus?: string
   subChatId: string
+  chatId: string
   isEdit?: boolean // Whether this represents an edit operation (for messaging)
 }
 
@@ -43,16 +51,19 @@ export const AgentPlanFileTool = memo(function AgentPlanFileTool({
   part,
   chatStatus,
   subChatId,
+  chatId,
   isEdit = false,
 }: AgentPlanFileToolProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [isImplementing, setIsImplementing] = useState(false)
   const { isPending } = getToolStatus(part, chatStatus)
   const isWrite = part.type === "tool-Write"
   // Get mode from per-subChat atomFamily
   const subChatModeAtom = useMemo(() => subChatModeAtomFamily(subChatId), [subChatId])
   const subChatMode = useAtomValue(subChatModeAtom)
   const setPendingBuildPlanSubChatId = useSetAtom(pendingBuildPlanSubChatIdAtom)
+  const setPendingBuildPlanNewChat = useSetAtom(pendingBuildPlanNewChatAtom)
 
   // Refs for scroll gradients (avoid re-renders)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -85,8 +96,8 @@ export const AgentPlanFileTool = memo(function AgentPlanFileTool({
   // View plan button enabled when there's content
   const viewPlanEnabled = planContent.length > 0
 
-  // Build button disabled during streaming
-  const buildDisabled = shouldShowShimmer
+  // Build button disabled during streaming or while creating new chat
+  const buildDisabled = shouldShowShimmer || isImplementing
 
   // Check if we have content to show
   const hasVisibleContent = planContent.length > 0
@@ -146,13 +157,22 @@ export const AgentPlanFileTool = memo(function AgentPlanFileTool({
     }
   }, [filePath, setCurrentPlanPath, setIsPlanSidebarOpen])
 
-  // Handle build plan - triggers via atom, consumed by ChatViewInner
+  // Handle "Implement here" - triggers via atom, consumed by ChatViewInner (existing behavior)
   const handleBuildPlan = useCallback(() => {
     const activeSubChatId = useAgentSubChatStore.getState().activeSubChatId
     if (activeSubChatId) {
       setPendingBuildPlanSubChatId(activeSubChatId)
     }
   }, [setPendingBuildPlanSubChatId])
+
+  // Handle "Implement" - creates new sub-chat with plan context (default action)
+  const handleBuildPlanNewChat = useCallback(() => {
+    const activeSubChatId = useAgentSubChatStore.getState().activeSubChatId
+    if (activeSubChatId && chatId && planContent) {
+      setIsImplementing(true)
+      setPendingBuildPlanNewChat({ subChatId: activeSubChatId, chatId, planContent })
+    }
+  }, [setPendingBuildPlanNewChat, chatId, planContent])
 
   // Handle copy plan
   const handleCopy = useCallback(() => {
@@ -306,15 +326,39 @@ export const AgentPlanFileTool = memo(function AgentPlanFileTool({
         </div>
 
         {subChatMode === "plan" && (
-          <Button
-            size="sm"
-            onClick={handleBuildPlan}
-            disabled={buildDisabled}
-            className="h-6 px-3 text-xs font-medium rounded-md transition-transform duration-150 active:scale-[0.97] disabled:opacity-50"
-          >
-            Approve
-            <Kbd className="ml-1.5 text-primary-foreground/70">⌘↵</Kbd>
-          </Button>
+          <div className="flex items-center">
+            <Button
+              size="sm"
+              onClick={handleBuildPlanNewChat}
+              disabled={buildDisabled}
+              className="h-6 px-3 text-xs font-medium rounded-r-none rounded-l-md transition-transform duration-150 active:scale-[0.97] disabled:opacity-50"
+            >
+              {isImplementing ? (
+                <IconSpinner className="h-3 w-3 animate-spin" />
+              ) : (
+                <>
+                  Implement
+                  <Kbd className="ml-1.5 text-primary-foreground/70">⌘↵</Kbd>
+                </>
+              )}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  disabled={buildDisabled}
+                  className="h-6 px-1 text-xs font-medium rounded-l-none rounded-r-md border-l border-primary-foreground/20 transition-transform duration-150 active:scale-[0.97] disabled:opacity-50"
+                >
+                  <IconChevronDown className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top">
+                <DropdownMenuItem onClick={handleBuildPlan}>
+                  Implement here
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         )}
       </div>
     </div>
